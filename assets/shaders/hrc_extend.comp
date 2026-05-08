@@ -1,0 +1,91 @@
+#version 450
+
+// HRC Phase B: Ray Extension — builds cascade level k from level k-1.
+// Cross-slice compositing: two level-(k-1) probes are composited into one
+// level-k probe that covers a wider angular interval (Eq. 18-20 from paper).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// set=0 readonly buffer → Compute::BindReadBuffer(0, ...)
+layout(set = 0, binding = 0) readonly buffer PrevRay { uvec2 data[]; } prevRay;
+
+// set=1 rw buffer → Compute::BindReadWriteBuffer(0, ...)
+layout(set = 1, binding = 0) buffer CurrRay { uvec2 data[]; } currRay;
+
+// set=2 uniform → Compute::PushUniform(0, ...)
+layout(set = 2, binding = 0) uniform ExtendUniforms {
+    uint  probeCount;
+    uint  level;
+    float invNumRays;   // 1.0 / numRays, precomputed to avoid integer division
+    uint  prevRayW;     // entries per row in prevRay buffer
+    uint  currRayW;     // entries per row in currRay buffer
+    uint  sliceCount;
+    uint  pad2;
+    uint  pad3;
+};
+
+vec4 unpackF16(uvec2 p) {
+    return vec4(unpackHalf2x16(p.x), unpackHalf2x16(p.y));
+}
+uvec2 packF16(vec4 v) {
+    return uvec2(packHalf2x16(v.xy), packHalf2x16(v.zw));
+}
+
+int dirToSliceOffset(int dirIdx, int intervalSize) {
+    return dirIdx * 2 - intervalSize;
+}
+
+struct RayData { vec3 rad; float trans; };
+
+RayData composite(RayData near, RayData far) {
+    return RayData(near.rad + far.rad * near.trans, near.trans * far.trans);
+}
+
+RayData loadPrev(int probeIdx, int rayIdx, int sliceIdx) {
+    int prevLevel     = int(level) - 1;
+    int prevNumProbes = int((probeCount + (1u << uint(prevLevel)) - 1u) >> uint(prevLevel));
+    int prevNumRays   = (prevLevel == 0) ? 1 : ((1 << prevLevel) + 1);
+    if (probeIdx < 0 || probeIdx >= prevNumProbes ||
+        rayIdx   < 0 || rayIdx   >= prevNumRays   ||
+        sliceIdx < 0 || sliceIdx >= int(sliceCount)) {
+        return RayData(vec3(0.0), 1.0);
+    }
+    int idx = (prevLevel == 0)
+        ? sliceIdx * int(prevRayW) + probeIdx
+        : sliceIdx * int(prevRayW) + (probeIdx << prevLevel) + probeIdx + rayIdx;
+    vec4 r = unpackF16(prevRay.data[idx]);
+    return RayData(r.rgb, r.a);
+}
+
+void main() {
+    int texelX   = int(gl_GlobalInvocationID.x);
+    int sliceIdx = int(gl_GlobalInvocationID.y);
+
+    int interval    = 1 << int(level);
+    int numRays     = interval + 1;
+    int levelProbes = int((probeCount + uint(interval) - 1u) >> level);
+    int probeIdx    = int(floor(float(texelX) * invNumRays));
+    int rayIdx      = texelX - probeIdx * numRays;
+
+    if (probeIdx >= levelProbes || sliceIdx >= int(sliceCount)) return;
+
+    int prevInterval = interval / 2;
+    int lower = rayIdx / 2;
+    int upper = (rayIdx + 1) / 2;
+
+    int sliceOffA = dirToSliceOffset(lower, prevInterval);
+    RayData crossA = composite(
+        loadPrev(probeIdx * 2,     lower, sliceIdx),
+        loadPrev(probeIdx * 2 + 1, upper, sliceIdx + sliceOffA)
+    );
+
+    int sliceOffB = dirToSliceOffset(upper, prevInterval);
+    RayData crossB = composite(
+        loadPrev(probeIdx * 2,     upper, sliceIdx),
+        loadPrev(probeIdx * 2 + 1, lower, sliceIdx + sliceOffB)
+    );
+
+    vec3  avgRad   = (crossA.rad   + crossB.rad  ) * 0.5;
+    float avgTrans = (crossA.trans + crossB.trans) * 0.5;
+    currRay.data[sliceIdx * int(currRayW) + texelX] = packF16(vec4(avgRad, avgTrans));
+}

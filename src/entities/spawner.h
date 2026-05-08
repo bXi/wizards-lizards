@@ -1,6 +1,6 @@
 #pragma once
 
-#include <texture/texturehandler.h>
+#include <luminoveau.h>
 
 #include "lizard.h"
 #include "physicsobject.h"
@@ -8,7 +8,6 @@
 #include "utils/vectors.h"
 
 #include "ui/ui.h"
-#include "render2d/render2dhandler.h"
 
 class Lizard;
 class Player;
@@ -23,7 +22,7 @@ public:
 	float width = 16.0f;
 	float height = 16.0f;
 
-	Texture sprite;
+	TextureAsset sprite;
 
 	vf2d pos = { 0.0f , 0.0f };
 
@@ -37,7 +36,7 @@ public:
 	{
 		width = 32.0f;
 		height = 32.0f;
-		sprite = Textures::GetTexture("assets/entities/crate.png");
+		sprite = AssetHandler::GetTexture("assets/entities/crate.png");
 
 		maxSpawns = 100;
 		spawnsLeft = 100;
@@ -46,7 +45,7 @@ public:
 
 	void draw() 
 	{
-        Render2D::DrawTexture(sprite, pos * width, {width, height});
+        Draw::Texture(sprite, pos * width, {width, height});
 
         if (spawnTimer < 0.f) spawnTimer = 0.f;
 

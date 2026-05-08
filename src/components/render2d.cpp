@@ -1,26 +1,42 @@
 #include "render2d.h"
+#include "configuration.h"
 
 #include "rigidbody2d.h"
 #include "sprite.h"
 #include "playerclass.h"
 #include "renderframe.h"
-#include "configuration/configuration.h"
-#include "texture/texturehandler.h"
+#include "spriteeffect.h"
+#include "luminoveau.h"
+
 #include "utils/vectors.h"
 
-#include "render2d/render2dhandler.h"
 
 void Render2DComp::draw(flecs::entity* entity)
 {
 
 	if (entity->has<Sprite>()) {
 
-		auto* sprite = entity->get<Sprite>();
+		auto* sprite = entity->get_mut<Sprite>();
 		auto* rigidBody = entity->get_mut<RigidBody2D>();
 
 		int renderFrame = 0;
 
+        [[maybe_unused]]auto _getRectangle = [&](int x, int y) {
+            return rectf( static_cast<float>(x * Configuration::tileWidth), static_cast<float>(y * Configuration::tileHeight), static_cast<float>(Configuration::tileWidth), static_cast<float>(Configuration::tileHeight) );
+        };
 
+        [[maybe_unused]]auto _getTile = [&](int tileId) {
+            return _getRectangle(tileId % 16, (int)tileId / 16);
+        };
+
+        [[maybe_unused]]auto _getTileEx = [&](int tileId, bool doubleHeight) {
+            rectf r = _getRectangle(tileId % 16, (int)tileId / 16);
+            if (doubleHeight) {
+                r.y -= r.height;
+                r.height *= 2;
+            }
+            return r;
+        };
 
 		if (entity->has<PlayerClass>())
 		{
@@ -39,7 +55,8 @@ void Render2DComp::draw(flecs::entity* entity)
 			renderFrame = 24;
 		}*/
 
-		const vf2d pos = rigidBody->RigidBody->GetPosition();
+		const b2Vec2 b2pos = b2Body_GetPosition(rigidBody->RigidBody);
+		const vf2d pos = {b2pos.x, b2pos.y};
 
 		const rectf position = {
 			pos.x * static_cast<float>(Configuration::tileWidth) - sprite->originX,
@@ -50,7 +67,7 @@ void Render2DComp::draw(flecs::entity* entity)
 
 		rectf source;
 		if (sprite->multiSheet) {
-			source = Textures::GetTile(renderFrame, sprite->doubleHeight, sprite->spriteWidth, sprite->spriteHeight);
+			source = _getTileEx(renderFrame, sprite->doubleHeight);
 		}
 		else
 		{
@@ -61,7 +78,10 @@ void Render2DComp::draw(flecs::entity* entity)
 			source.width *= -1.0f;
 		}
 
-        Render2D::DrawTexturePart(sprite->sprite, {position.x, position.y}, {position.width, position.height},source);
+        bool hasEffect = entity->has<SpriteEffect>();
+        if (hasEffect) Draw::SetEffect(entity->get_mut<SpriteEffect>()->effect);
+        Draw::TexturePart(sprite->sprite, {position.x, position.y}, {position.width, position.height}, source);
+        if (hasEffect) Draw::ClearEffects();
 
 		// debug for body center and sprite size
 		//DrawRectangleRec(position, { 255,255,255,64 });

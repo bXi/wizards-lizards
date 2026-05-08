@@ -2,12 +2,11 @@
 
 #include <vector>
 #include "baseclass.h"
+#include "luminoveau.h"
 
 
 class WizardClass : public BaseClass
 {
-
-    
 
     struct lineSegment
     {
@@ -18,8 +17,15 @@ class WizardClass : public BaseClass
 
     std::vector<lineSegment> vecLines;
 
+    static constexpr int LASER_PARTICLE_COUNT = 12;
+    ParticleSystemHandle m_laserHitParticles[LASER_PARTICLE_COUNT];
+    bool                 m_laserParticlesInited = false;
+    std::vector<vf2d>    m_wallHitPositions;
+
     float secondsSinceLastShot = 0.0f;
     float laserLastDamageTick = 0.0f;
+    float secondsSinceLastWarp = 0.0f;
+    float secondsSinceLastFragment = 0.0f;
 
 public:
     int getSpriteIndex() override

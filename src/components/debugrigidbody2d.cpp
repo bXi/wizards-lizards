@@ -1,45 +1,36 @@
 #include "debugrigidbody2d.h"
+#include "configuration.h"
 
 #include "rigidbody2d.h"
-#include "configuration/configuration.h"
+#include "luminoveau.h"
 #include "utils/vectors.h"
 
-#include "render2d/render2dhandler.h"
 
 void DebugRigidBody2D::draw(flecs::entity entity)
 {
-
 	if (entity.has<RigidBody2D>()) {
 
-		auto* rigidBody = entity.get_mut<RigidBody2D>()->RigidBody;
+		b2BodyId bodyId = entity.get_mut<RigidBody2D>()->RigidBody;
 
+		int shapeCount = b2Body_GetShapeCount(bodyId);
+		std::vector<b2ShapeId> shapes(shapeCount);
+		b2Body_GetShapes(bodyId, shapes.data(), shapeCount);
 
+		for (b2ShapeId shapeId : shapes) {
+			if (b2Shape_GetType(shapeId) == b2_polygonShape) {
+				b2Polygon poly = b2Shape_GetPolygon(shapeId);
+				b2Vec2 size = {poly.vertices[2].x - poly.vertices[0].x, poly.vertices[2].y - poly.vertices[0].y};
 
+				b2AABB aabb = b2Shape_GetAABB(shapeId);
+				b2Vec2 position = {(aabb.lowerBound.x + aabb.upperBound.x) * 0.5f, (aabb.lowerBound.y + aabb.upperBound.y) * 0.5f};
+				position.x -= size.x / 2.f;
+				position.y -= size.y / 2.f;
 
-    // Iterate over the fixtures associated with the body
-    for (b2Fixture* fixture = rigidBody->GetFixtureList(); fixture; fixture = fixture->GetNext()) {
-
-        if (fixture->GetType() == b2Shape::e_polygon) {
-            // Cast the shape to b2PolygonShape
-            b2PolygonShape* polygonShape = static_cast<b2PolygonShape*>(fixture->GetShape());
-
-            // Get the size (assuming it's a box, so it has 4 vertices)
-            b2Vec2 size = polygonShape->m_vertices[2] - polygonShape->m_vertices[0];
-
-            // Get the position of the fixture
-            b2Vec2 position = fixture->GetAABB(0).GetCenter();
-
-            position.x -= size.x / 2.f;
-            position.y -= size.y / 2.f;
-
-            Render2D::DrawRectangleFilled(vi2d(position) * vi2d(Configuration::tileWidth, Configuration::tileHeight), vi2d(size) * vi2d(Configuration::tileWidth, Configuration::tileHeight), color);
-
-        }
-    }
-
-
-
-//        Render2D::DrawTexturePart(sprite->sprite, {position.x, position.y}, {position.width, position.height},source);
-
+				Draw::RectangleFilled(
+					vi2d{(int)position.x, (int)position.y} * vi2d(Configuration::tileWidth, Configuration::tileHeight),
+					vi2d{(int)size.x, (int)size.y} * vi2d(Configuration::tileWidth, Configuration::tileHeight),
+					color);
+			}
+		}
 	}
 }

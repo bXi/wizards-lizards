@@ -3,8 +3,7 @@
 #include <mutex>
 #include <thread>
 
-#include "configuration/configuration.h"
-#include "texture/texturehandler.h"
+#include "luminoveau.h"
 
 #include "map/dungeon.h"
 #include "map/room.h"
@@ -12,10 +11,10 @@
 class LevelManager
 {
 private:
-	Texture finalTexture;
-	Texture dungeonTileset;
+	TextureAsset finalTexture;
+	TextureAsset dungeonTileset;
 
-	Texture finalTextureImage;
+	TextureAsset finalTextureImage;
 public:
 
 
@@ -27,8 +26,8 @@ public:
 	Dungeon getDungeon();
 	Dungeon getBossRoom();
 	Dungeon getTestRoom();
-	Texture drawLevel();
-	void renderRow(int start, int rows, Dungeon dungeon, Texture finalTextureImage, Texture dungeonTileset);
+	TextureAsset drawLevel();
+	void renderRow(int start, int rows, Dungeon dungeon, TextureAsset finalTextureImage, TextureAsset dungeonTileset);
 
 	std::vector<Room*> rooms;
 

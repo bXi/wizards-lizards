@@ -26,22 +26,12 @@ public:
 
 	static void removeEntity(flecs::entity* entity)
 	{
-
 		if (entity->has<RigidBody2D>())
 		{
-
-			b2Body* body = entity->get_mut<RigidBody2D>()->RigidBody;
-
-			// Delete the fixtures attached to the body
-			b2Fixture* fixture = body->GetFixtureList();
-			while (fixture) {
-				b2Fixture* nextFixture = fixture->GetNext();
-				body->DestroyFixture(fixture);
-				fixture = nextFixture;
+			b2BodyId bodyId = entity->get_mut<RigidBody2D>()->RigidBody;
+			if (b2Body_IsValid(bodyId)) {
+				b2DestroyBody(bodyId);
 			}
-
-			body->GetWorld()->DestroyBody(body);
-
 		}
 
 		entity->destruct();

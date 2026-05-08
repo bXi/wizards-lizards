@@ -4,7 +4,7 @@ void CreateFireballEntity(flecs::entity* player, vf2d pos, vf2d vel) {
 
 	const auto& ecs = ECS::getWorld();
 
-	Texture sprite = Textures::GetTexture("assets/players/wizard/fireball.png");
+	Texture sprite = AssetHandler::GetTexture("assets/players/wizard/fireball.png");
 
 	flecs::entity entity;
 
@@ -13,27 +13,23 @@ void CreateFireballEntity(flecs::entity* player, vf2d pos, vf2d vel) {
 		.set<Sprite>({ 8.f, 8.f, sprite })
 		.set<Render2DComp>({  });
 
-	b2Body* RigidBody = nullptr;
-
-	b2CircleShape CircleShape;
-	CircleShape.m_radius = 0.125f;
-
 	auto userData = std::make_unique<UserData>();
 	userData->entity_id = entity.id();
 
-	b2BodyDef bodyDef;
+	b2BodyDef bodyDef = b2DefaultBodyDef();
 	bodyDef.type = b2_dynamicBody;
-	bodyDef.position.Set(pos.x, pos.y);
-	bodyDef.userData.pointer = reinterpret_cast<uintptr_t>(userData.get());
-	RigidBody = World::createBody(&bodyDef);
+	bodyDef.position = {pos.x, pos.y};
+	bodyDef.gravityScale = 0.0f;
+	bodyDef.userData = userData.get();
+	b2BodyId bodyId = World::createBody(&bodyDef);
 
-	b2FixtureDef fixtureDef;
-	fixtureDef.shape = &CircleShape;
-	fixtureDef.density = 1.0f;
-	fixtureDef.friction = 0.3f;
-	RigidBody->CreateFixture(&fixtureDef);
+	b2ShapeDef shapeDef = b2DefaultShapeDef();
+	shapeDef.density = 1.0f;
+	shapeDef.enableContactEvents = true;
+	b2Circle circle = {{0.0f, 0.0f}, 0.125f};
+	b2CreateCircleShape(bodyId, &shapeDef, &circle);
 
-	entity.emplace<RigidBody2D>(RigidBody);
+	entity.emplace<RigidBody2D>(bodyId);
 
 	entity.set<UserDataComponent>({ std::move(userData) });
 
@@ -44,5 +40,5 @@ void CreateFireballEntity(flecs::entity* player, vf2d pos, vf2d vel) {
 	entity.emplace<Owner>(player->id());
 
 	vf2d velocity = vel.norm() * 20;
-	entity.get_mut<RigidBody2D>()->RigidBody->SetLinearVelocity(velocity);
+	b2Body_SetLinearVelocity(bodyId, {velocity.x, velocity.y});
 }

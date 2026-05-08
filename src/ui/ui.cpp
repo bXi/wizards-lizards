@@ -1,12 +1,14 @@
 #include "ui.h"
-#include "configuration/configuration.h"
-#include "texture/texturehandler.h"
-#include "log/loghandler.h"
+#include <luminoveau.h>
+#include <cmath>
+#include "configuration.h"
+#include "log.h"
 
 #include "components/rigidbody2d.h"
 #include "components/playerinput.h"
 #include "components/playerclass.h"
 #include "components/playerindex.h"
+#include "components/playerxp.h"
 
 void UI::drawSmallBar(const vf2d &pos, const vi2d &offset, const int width, const int height, const Color color,
                       const float percentage) {
@@ -15,9 +17,9 @@ void UI::drawSmallBar(const vf2d &pos, const vi2d &offset, const int width, cons
     const auto tileWidth = static_cast<float>(Configuration::tileWidth);
     const auto tileHeight = static_cast<float>(Configuration::tileHeight);
 
-    Render2D::DrawRectangleFilled({((pos.x * tileWidth) + localOffset.x    ), ((pos.y * tileHeight) + localOffset.y    )}, {(float)width,                    (float)height},         WHITE);
-    Render2D::DrawRectangleFilled({((pos.x * tileWidth) + localOffset.x + 1), ((pos.y * tileHeight) + localOffset.y + 1)}, {(float)width - 2,              (float)height - 2}, BLACK);
-    Render2D::DrawRectangleFilled({((pos.x * tileWidth) + localOffset.x + 1), ((pos.y * tileHeight) + localOffset.y + 1)}, {(float)(width - 2) * percentage, (float)height - 2}, color);
+    Draw::RectangleFilled({((pos.x * tileWidth) + localOffset.x    ), ((pos.y * tileHeight) + localOffset.y    )}, {(float)width,                    (float)height},         WHITE);
+    Draw::RectangleFilled({((pos.x * tileWidth) + localOffset.x + 1), ((pos.y * tileHeight) + localOffset.y + 1)}, {(float)width - 2,              (float)height - 2}, BLACK);
+    Draw::RectangleFilled({((pos.x * tileWidth) + localOffset.x + 1), ((pos.y * tileHeight) + localOffset.y + 1)}, {(float)(width - 2) * percentage, (float)height - 2}, color);
 }
 
 void UI::drawTimerBar() {
@@ -27,10 +29,10 @@ void UI::drawTimerBar() {
 
     int barThickness = 8;
 
-    Render2D::DrawRectangleFilled({0, 0}, {(float)barThickness, (float)screenHeight}, BLACK); // Left
-    Render2D::DrawRectangleFilled({(float)screenWidth - (float)barThickness, 0}, {(float)barThickness, (float)screenHeight}, BLACK); // Right
-    Render2D::DrawRectangleFilled({0, 0}, {(float)screenWidth, (float)barThickness}, BLACK); // Top
-    Render2D::DrawRectangleFilled({0, (float)screenHeight - (float)barThickness}, {(float)screenWidth, (float)barThickness}, BLACK); // Bottom
+    Draw::RectangleFilled({0, 0}, {(float)barThickness, (float)screenHeight}, BLACK); // Left
+    Draw::RectangleFilled({(float)screenWidth - (float)barThickness, 0}, {(float)barThickness, (float)screenHeight}, BLACK); // Right
+    Draw::RectangleFilled({0, 0}, {(float)screenWidth, (float)barThickness}, BLACK); // Top
+    Draw::RectangleFilled({0, (float)screenHeight - (float)barThickness}, {(float)screenWidth, (float)barThickness}, BLACK); // Bottom
 
 
     rectf bars[5] = {
@@ -85,21 +87,22 @@ void UI::drawTimerBar() {
     }
 
     for (int i = 0; i < 5; ++i) {
-        Render2D::DrawRectangleFilled({bars[i].x, bars[i].y}, {bars[i].width, bars[i].height}, c[barcolor]);
+        Draw::RectangleFilled({bars[i].x, bars[i].y}, {bars[i].width, bars[i].height}, c[barcolor]);
     }
 
 
 }
 
 [[maybe_unused]] void UI::DrawPlayerBar(flecs::entity entity) {
-    const Texture uiElements = Textures::GetTexture("assets/ui/ui.png");
-    const Texture items = Textures::GetTexture("assets/tilesets/items-1.png");
+    const Texture uiElements = AssetHandler::GetTexture("assets/ui/ui.png");
+    const Texture items = AssetHandler::GetTexture("assets/tilesets/items-1.png");
 
     rectf selectedPowerUpBox = {539, 460, 24, 24};
 
     auto player = entity.get_mut<PlayerInput>();
+    auto* xp = entity.has<PlayerXP>() ? entity.get_mut<PlayerXP>() : nullptr;
 
-    auto rigidBody2d = entity.get_mut<RigidBody2D>()->RigidBody;
+    b2BodyId rigidBody2d = entity.get_mut<RigidBody2D>()->RigidBody;
     auto playerClass = entity.get<PlayerClass>();
 
     std::vector<int> weaponIcon = {0, 0, 0, 0};
@@ -111,19 +114,19 @@ void UI::drawTimerBar() {
             weaponIcon.at(2) = 72;
             weaponIcon.at(3) = 101;
             break;
-        case PlayerClassType::BERSERKER:
+        case PlayerClassType::WRONG_WIZARD:
             weaponIcon.at(0) = 63;
             weaponIcon.at(1) = 79;
             weaponIcon.at(2) = 72;
             weaponIcon.at(3) = 101;
             break;
-        case PlayerClassType::BOUNCER:
+        case PlayerClassType::PINBALL_WIZARD:
             weaponIcon.at(0) = 62;
             weaponIcon.at(1) = 79;
             weaponIcon.at(2) = 72;
             weaponIcon.at(3) = 101;
             break;
-        case PlayerClassType::TRAPPER:
+        case PlayerClassType::FROST_WIZARD:
             weaponIcon.at(0) = 61;
             weaponIcon.at(1) = 79;
             weaponIcon.at(2) = 72;
@@ -135,16 +138,23 @@ void UI::drawTimerBar() {
     int weaponCount = 4;
     float circleRadius = 80.0f;
 
-    Log::AddLine("Campos:", Helpers::TextFormat("X: %.2f Y: %.2f", Camera::GetTarget().x, Camera::GetTarget().y));
+    //WLLog::AddLine("Campos:", Helpers::TextFormat("X: %.2f Y: %.2f", Camera::GetTarget().x, Camera::GetTarget().y));
 
-    vf2d worldPos = Camera::ToScreenSpace((vf2d) rigidBody2d->GetPosition() * 32);
+    b2Vec2 rb2dPos = b2Body_GetPosition(rigidBody2d);
+    vf2d worldPos = Camera::ToScreenSpace(vf2d{rb2dPos.x, rb2dPos.y} * 32);
 
     float selectedWeaponAngleOffset = -((static_cast<float>(player->selectedWeapon - 1) / static_cast<float>(weaponCount)) * 2 * PI) + (PI / 2) * 3;
 
-    Log::AddLine("lerp:", Helpers::TextFormat("%.2f", player->weaponSelectLerp->getValue()));
+    //WLLog::AddLine("lerp:", Helpers::TextFormat("%.2f", player->weaponSelectLerp->getValue()));
 
     if (player->weaponSelectLerp->isFinished()) {
-        player->weaponSelectVisibleLerp->started = true;
+        if (xp && xp->isHolding) {
+            // Keep wheel visible while upgrading
+            player->weaponSelectVisibleLerp->started = false;
+            player->weaponSelectVisibleLerp->time = 0.0f;
+        } else {
+            player->weaponSelectVisibleLerp->started = true;
+        }
     }
 
     int previousWeapon = player->selectedWeapon - 1;
@@ -208,32 +218,73 @@ void UI::drawTimerBar() {
             color.a = 0;
         }
 
+        auto _getRectangle = [&](int x, int y) {
+            return rectf{ static_cast<float>(x * Configuration::tileWidth), static_cast<float>(y * Configuration::tileHeight), static_cast<float>(Configuration::tileWidth), static_cast<float>(Configuration::tileHeight) };
+        };
 
-        Render2D::DrawTexturePart(uiElements, {boxPosition.x, boxPosition.y}, {boxPosition.width, boxPosition.height}, selectedPowerUpBox, color);
-        auto weaponIconPos = Textures::GetTile(weaponIcon[i]);
+        auto _getTile = [&_getRectangle](int tileId) {
+            return _getRectangle(tileId % 16, (int)tileId / 16);
+        };
 
-        Render2D::DrawTexturePart(items, {itemPosition.x, itemPosition.y}, {itemPosition.width, itemPosition.height}, weaponIconPos, color);
+
+        Draw::TexturePart(uiElements, {boxPosition.x, boxPosition.y}, {boxPosition.width, boxPosition.height}, selectedPowerUpBox, color);
+        auto weaponIconPos = _getTile(weaponIcon[i]);
+
+        Draw::TexturePart(items, {itemPosition.x, itemPosition.y}, {itemPosition.width, itemPosition.height}, weaponIconPos, color);
 
 
     }
+
+    // Upgrade progress ring and can't-afford indicator
+    if (xp && xp->isHolding) {
+        constexpr float ringRadius = 95.0f;
+        constexpr int   ringSegments = 48;
+        constexpr float ringThickness = 4.0f;
+        const Color ringColor = { 255, 215, 0, 220 };
+
+        float progress = xp->holdTimer / PlayerXP::HOLD_DURATION;
+        int drawnSegments = static_cast<int>(progress * ringSegments);
+
+        for (int s = 0; s < drawnSegments; ++s) {
+            float a0 = (-PI / 2.f) + (static_cast<float>(s)       / ringSegments) * 2.f * PI;
+            float a1 = (-PI / 2.f) + (static_cast<float>(s + 1)   / ringSegments) * 2.f * PI;
+            vf2d p0 = { worldPos.x + ringRadius * cosf(a0), worldPos.y + ringRadius * sinf(a0) };
+            vf2d p1 = { worldPos.x + ringRadius * cosf(a1), worldPos.y + ringRadius * sinf(a1) };
+            Draw::ThickLine(p0, p1, ringColor, ringThickness);
+        }
+    }
+
+    // Can't afford indicator — show when ACCEPT is held but XP is insufficient
+    // TODO: replace sprite 5 from items-1.png with a proper "can't afford" icon
+    if (xp) {
+        int weaponIdx = player->selectedWeapon - 1;
+        bool anyHeld = false;
+        for (const auto& controller : player->controllers) {
+            if (controller->is(Buttons::ACCEPT, Action::HELD)) { anyHeld = true; break; }
+        }
+        if (anyHeld && !xp->canAfford(player->weaponUpgrades[weaponIdx])) {
+            rectf cantAffordSrc = { 5.f * static_cast<float>(Configuration::tileWidth), 0.f,
+                                    static_cast<float>(Configuration::tileWidth), static_cast<float>(Configuration::tileHeight) };
+            vf2d iconPos = { worldPos.x - 16.f, worldPos.y - 16.f };
+            Draw::TexturePart(items, iconPos, { 32.f, 32.f }, cantAffordSrc, WHITE);
+        }
+    }
 }
 
-void UI::DrawMiniMap(Texture texture) {
+void UI::DrawMiniMap() {
 
     int miniMapSize = 200;
 
     auto data = World::getDungeon().getDungeonTileData();
     auto rooms = World::getDungeon().getRooms();
 
-    SDL_SetRenderTarget(Window::GetRenderer(), texture.texture);
-
     int offsetLeft = (Window::GetWidth() / 2) - miniMapSize / 2;
     int offsetTop = Window::GetHeight() - miniMapSize;
 
+    Draw::SetTargetRenderPass("minimap");
+
 
     auto borderColor = GRAY;
-
-//    ClearBackground(borderColor);
 
     for (const Room *room: rooms) {
         int miniMapX = room->pos.x * miniMapSize / data.width;
@@ -254,102 +305,75 @@ void UI::DrawMiniMap(Texture texture) {
             bgColor = PURPLE;
         }
 
-        Render2D::DrawRectangleFilled({(float)miniMapX, (float)miniMapY + 1.f},
+        Draw::RectangleFilled({(float)miniMapX, (float)miniMapY + 1.f},
                                 {(float)miniMapWidth, (float)miniMapHeight},
                       bgColor);
     }
 
+    // Draw borders with actual gaps where doors are, so z-ordering never hides them.
+    // Each side is drawn as 1px-thick filled segments that skip door positions.
     for (const Room *room: rooms) {
-        int miniMapX = room->pos.x * miniMapSize / data.width;
-        int miniMapY = room->pos.y * miniMapSize / data.height;
-
-        int miniMapWidth = room->size.x * miniMapSize / data.width;
-        int miniMapHeight = room->size.y * miniMapSize / data.height;
-
-        Render2D::DrawRectangle({(float)miniMapX, (float)miniMapY},
-                                {(float)miniMapWidth + 1, (float)miniMapHeight + 1},
-                           borderColor);
-
-    }
-
-    for (const Room *room: rooms) {
-        int miniMapX = room->pos.x * miniMapSize / data.width;
-        int miniMapY = room->pos.y * miniMapSize / data.height;
-
+        // Compute edges using the room's far corner rather than pos+size independently,
+        // so adjacent rooms share exactly the same pixel boundary (avoids integer-division gaps).
+        int miniMapX  = room->pos.x * miniMapSize / data.width;
+        int miniMapY  = room->pos.y * miniMapSize / data.height;
+        int miniMapX2 = (room->pos.x + room->size.x) * miniMapSize / data.width;
+        int miniMapY2 = (room->pos.y + room->size.y) * miniMapSize / data.height;
+        int miniMapWidth  = miniMapX2 - miniMapX;
+        int miniMapHeight = miniMapY2 - miniMapY;
         int roomSizeX = room->size.x / 34;
         int roomSizeY = room->size.y / 34;
+        int cellPxX   = (roomSizeX > 0) ? miniMapWidth  / roomSizeX : miniMapWidth;
+        int cellPxY   = (roomSizeY > 0) ? miniMapHeight / roomSizeY : miniMapHeight;
+        int doorGap   = 4;
 
-        auto bgColor = BLACK;
-
-        int doorSize = 6; // Adjust the size of the doorways
-        int totalRoomSize = miniMapSize / 8;
-
-        if (room->northExits > 0) {
-            int doorX = miniMapX + (totalRoomSize / 2) - (doorSize / 2);
-            int doorY = miniMapY;
-            int doorBit = 1;
-
-            for (int i = 0; i < roomSizeX; i++) {
-                if (room->northExits & doorBit) {
-                    Render2D::DrawRectangleFilled({(float)doorX, (float)doorY - 1}, {(float)doorSize, 1}, bgColor);
+        // Horizontal border side: draw segments along y, skipping door cells.
+        // Gap is clamped to the wall's extent so it never overruns the room boundary.
+        auto drawHSide = [&](int y, int exits, int numCells, int cellPx) {
+            int wallEnd = miniMapX + miniMapWidth;
+            int segX = miniMapX;
+            for (int i = 0; i < numCells; i++) {
+                if (exits & (1 << i)) {
+                    int gapX    = std::max(segX, miniMapX + i * cellPx + cellPx / 2 - doorGap / 2);
+                    int gapEnd  = std::min(gapX + doorGap, wallEnd);
+                    if (gapX > segX)
+                        Draw::RectangleFilled({(float)segX, (float)y}, {(float)(gapX - segX), 1.f}, borderColor);
+                    segX = gapEnd;
                 }
-                doorX += totalRoomSize;
-                doorBit <<= 1;
             }
-        }
+            if (segX <= wallEnd)
+                Draw::RectangleFilled({(float)segX, (float)y}, {(float)(wallEnd + 1 - segX), 1.f}, borderColor);
+        };
 
-
-        if (room->southExits > 0) {
-            int doorX = miniMapX + (totalRoomSize / 2) - (doorSize / 2);
-            int doorY = miniMapY + (roomSizeY * totalRoomSize);
-            int doorBit = 1;
-
-            for (int i = 0; i < roomSizeX; i++) {
-                if (room->southExits & doorBit) {
-                    Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, 1}, bgColor);
-
+        // Vertical border side: draw segments along x, skipping door cells.
+        auto drawVSide = [&](int x, int exits, int numCells, int cellPx) {
+            int wallEnd = miniMapY + miniMapHeight;
+            int segY = miniMapY;
+            for (int i = 0; i < numCells; i++) {
+                if (exits & (1 << i)) {
+                    int gapY   = std::max(segY, miniMapY + i * cellPx + cellPx / 2 - doorGap / 2);
+                    int gapEnd = std::min(gapY + doorGap, wallEnd);
+                    if (gapY > segY)
+                        Draw::RectangleFilled({(float)x, (float)segY}, {1.f, (float)(gapY - segY)}, borderColor);
+                    segY = gapEnd;
                 }
-                doorX += totalRoomSize;
-                doorBit <<= 1;
             }
-        }
+            if (segY <= wallEnd)
+                Draw::RectangleFilled({(float)x, (float)segY}, {1.f, (float)(wallEnd + 1 - segY)}, borderColor);
+        };
 
-        if (room->eastExits > 0) {
-            int doorX = miniMapX + (roomSizeX * totalRoomSize);
-            int doorY = miniMapY + (totalRoomSize / 2) - (doorSize / 2);
-            int doorBit = 1;
-
-            for (int i = 0; i < roomSizeY; i++) {
-                if (room->eastExits & doorBit) {
-                    Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {1, (float)doorSize}, bgColor);
-
-                }
-                doorY += totalRoomSize;
-                doorBit <<= 1;
-            }
-        }
-
-        if (room->westExits > 0) {
-            int doorX = miniMapX;
-            int doorY = miniMapY + (totalRoomSize / 2) - (doorSize / 2);
-            int doorBit = 1;
-
-            for (int i = 0; i < roomSizeY; i++) {
-                if (room->westExits & doorBit) {
-                    Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {1, (float)doorSize}, bgColor);
-
-                }
-                doorY += totalRoomSize;
-                doorBit <<= 1;
-            }
-        }
+        drawHSide(miniMapY,  room->northExits, roomSizeX, cellPxX);
+        drawHSide(miniMapY2, room->southExits, roomSizeX, cellPxX);
+        drawVSide(miniMapX,  room->westExits,  roomSizeY, cellPxY);
+        drawVSide(miniMapX2, room->eastExits,  roomSizeY, cellPxY);
     }
 
     const auto playerFilter = ECS::getWorld().filter<PlayerIndex>();
     playerFilter.each([&](flecs::entity entity, PlayerIndex index) {
-        auto *rigidBody2D = entity.get_mut<RigidBody2D>()->RigidBody;
+        b2BodyId rigidBody2D = entity.get_mut<RigidBody2D>()->RigidBody;
 
-        vf2d pos = rigidBody2D->GetPosition();
+        b2Vec2 b2pos = b2Body_GetPosition(rigidBody2D);
+        vf2d pos = {b2pos.x, b2pos.y};
 
         pos.x *= static_cast<float>(miniMapSize) / static_cast<float>(data.width);
         pos.y *= static_cast<float>(miniMapSize) / static_cast<float>(data.height);
@@ -358,19 +382,16 @@ void UI::DrawMiniMap(Texture texture) {
 
         playerColor.a = static_cast<unsigned char>(255.f - (std::fmod(Window::GetRunTime(), 0.4f) * 600.f));
 
-        Render2D::DrawCircle(pos, 2.f, playerColor);
+        Draw::CircleFilled(pos, 2.f, playerColor);
 
 
     });
 
 
-    SDL_SetRenderTarget(Window::GetRenderer(), nullptr);
+    Draw::ResetTargetRenderPass();
 
-
-    //Rectangle srcRect = {0.f, 0.f, static_cast<float>(texture.width), -static_cast<float>(texture.height)};
-    //Rectangle dstRect = {static_cast<float>(offsetLeft), static_cast<float>(offsetTop + 1), static_cast<float>(texture.width), static_cast<float>(texture.height)};
-
-    Render2D::DrawTexture(texture, {static_cast<float>(offsetLeft), static_cast<float>(offsetTop + 1)}, {static_cast<float>(texture.width), static_cast<float>(texture.height)}, {255, 255, 255, 200});
+    auto *fb = Renderer::GetFramebuffer("minimap_framebuffer");
+    Draw::Texture(fb->textureView, {static_cast<float>(offsetLeft), static_cast<float>(offsetTop + 1)}, {static_cast<float>(miniMapSize), static_cast<float>(miniMapSize)}, {255, 255, 255, 200});
 
 }
 
@@ -379,45 +400,51 @@ void UI::DrawMiniMap(Texture texture) {
     constexpr int baseY = 270;
     int margin = 20;
 
-    //auto font = Fonts::GetFont("assets/fonts/APL386.ttf", 20);
+    AssetHandler::GetFont("assets/fonts/APL386.ttf", 20);
 
     int y = 0;
 
 
-    Log::AddLine("FPS:", Helpers::TextFormat("%d", Window::GetFPS()));
+    WLLog::AddLine("FPS:", Helpers::TextFormat("%d", Window::GetFPS()));
 
-    Log::AddLine("GameTime:", Helpers::TextFormat("%.2f", Configuration::gameTime));
-    Log::AddLine("Bodies:", Helpers::TextFormat("%d", World::getPhysicsWorld().GetBodyCount()));
-    Log::AddLine("SlowMoF:", Helpers::TextFormat("%f", Configuration::slowMotionFactor));
+    WLLog::AddLine("GameTime:", Helpers::TextFormat("%.2f", Configuration::gameTime));
+    WLLog::AddLine("Bodies awake:", Helpers::TextFormat("%d", b2World_GetBodyEvents(World::getPhysicsWorld()).moveCount));
+    WLLog::AddLine("SlowMoF:", Helpers::TextFormat("%f", Configuration::slowMotionFactor));
 
 
-    Log::AddLine("");
-    Log::AddLine("-- Players --");
+    WLLog::AddLine("");
+    WLLog::AddLine("-- Players --");
 
     const auto playerFilter = ECS::getWorld().filter<PlayerIndex, RigidBody2D>();
     playerFilter.each([&](flecs::entity entity, PlayerIndex playerIndex, RigidBody2D rigidBody2D) {
-        Log::AddLine(
+        WLLog::AddLine(
                 Helpers::TextFormat("Player %d pos:", playerIndex.index),
-                Helpers::TextFormat("X: %.2f Y: %.2f", rigidBody2D.RigidBody->GetPosition().x,
-                           rigidBody2D.RigidBody->GetPosition().y)
+                Helpers::TextFormat("X: %.2f Y: %.2f", b2Body_GetPosition(rigidBody2D.RigidBody).x,
+                           b2Body_GetPosition(rigidBody2D.RigidBody).y)
         );
     });
 
-    auto lines = Log::getLines();
+    auto lines = WLLog::getLines();
+
+    auto debugFont = AssetHandler::GetFont("assets/fonts/APL386.ttf", 18);
+    for (const auto &line : lines) {
+        WLLog::setHeaderWidth(Text::MeasureText(debugFont, line.first, 18));
+        WLLog::setLongestLineWidth(Text::MeasureText(debugFont, line.second, 18));
+    }
 
     rectf backgroundRect = {
             static_cast<float>(baseX - margin),
             static_cast<float>(baseY - margin),
-            static_cast<float>(Log::getHeaderWidth() + Log::getLongestLineWidth() + (margin * 3)),
+            static_cast<float>(WLLog::getHeaderWidth() + WLLog::getLongestLineWidth() + (margin * 3)),
             static_cast<float>((lines.size() * 25) + (margin * 2) - 10)
     };
 
-    Render2D::DrawRectangleRoundedFilled({backgroundRect.x, backgroundRect.y}, {backgroundRect.width, backgroundRect.height}, 10.f, {0, 0, 0, 127});
+    Draw::RectangleRoundedFilled({backgroundRect.x, backgroundRect.y}, {backgroundRect.width, backgroundRect.height}, 10.f, {0, 0, 0, 127});
 
 
     for (const auto &line: lines) {
-        Fonts::DrawText("assets/fonts/APL386.ttf", 18, vi2d(baseX, baseY + y), line.first.c_str(), LIME);
-        Fonts::DrawText("assets/fonts/APL386.ttf", 18, vi2d(baseX + Log::getHeaderWidth() + margin, baseY + y), line.second.c_str(), LIME);
+        Text::DrawText(debugFont, {(float)baseX, (float)(baseY + y)}, line.first.c_str(), LIME);
+        Text::DrawText(debugFont, {(float)(baseX + WLLog::getHeaderWidth() + margin), (float)(baseY + y)}, line.second.c_str(), LIME);
 
         y += 25;
     }

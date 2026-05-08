@@ -1,0 +1,66 @@
+#version 450
+
+// HRC Bounce — converts the previous frame's fluence into diffuse re-emission
+// at probe resolution. Wall probes (high opacity) borrow fluence from exterior
+// cardinal neighbours so light doesn't vanish inside surfaces. Result feeds
+// back into the seed shader as extra radiance, giving multi-bounce GI.
+//
+// Blend: ownFluence*(1-opacity) + exteriorFluence*opacity gives a continuous
+// transition: transparent probes self-illuminate, wall probes use neighbours.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// set=0: read resources
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D prevFluence;
+layout(set = 0, binding = 1, rgba16f) uniform readonly image2D worldTex;
+
+// set=1: rw resources
+layout(set = 1, binding = 0, rgba16f) uniform image2D bounceOut;
+
+// set=2: uniform
+layout(set = 2, binding = 0) uniform BounceParams {
+    uint  screenW;
+    uint  screenH;
+    float albedo;   // 0 = bounces disabled (writes zeros)
+    float pad0;
+};
+
+void main() {
+    int x = int(gl_GlobalInvocationID.x);
+    int y = int(gl_GlobalInvocationID.y);
+    ivec2 pdim = imageSize(bounceOut);
+    if (x >= pdim.x || y >= pdim.y) return;
+
+    if (albedo == 0.0) {
+        imageStore(bounceOut, ivec2(x, y), vec4(0.0));
+        return;
+    }
+
+    float spacing  = float(screenW) / float(pdim.x);
+    ivec2 worldPos = ivec2((vec2(x, y) + 0.5) * spacing);
+    worldPos = clamp(worldPos, ivec2(0), ivec2(int(screenW) - 1, int(screenH) - 1));
+    float opacity = imageLoad(worldTex, worldPos).a;
+
+    vec3  ownFluence = imageLoad(prevFluence, ivec2(x, y)).rgb;
+    vec3  extFluence = vec3(0.0);
+    float extWeight  = 0.0;
+
+    const ivec2 dirs[4] = ivec2[4](ivec2(-1,0), ivec2(1,0), ivec2(0,-1), ivec2(0,1));
+    for (int i = 0; i < 4; i++) {
+        ivec2 np = ivec2(x, y) + dirs[i];
+        if (np.x < 0 || np.x >= pdim.x || np.y < 0 || np.y >= pdim.y) continue;
+        ivec2 nwp = clamp(ivec2((vec2(np) + 0.5) * spacing),
+                          ivec2(0), ivec2(int(screenW)-1, int(screenH)-1));
+        float nOpacity = imageLoad(worldTex, nwp).a;
+        if (nOpacity < opacity) {
+            float w = 1.0 - nOpacity;
+            extFluence += imageLoad(prevFluence, np).rgb * w;
+            extWeight  += w;
+        }
+    }
+    if (extWeight > 0.001) extFluence /= extWeight;
+
+    vec3 fluence = ownFluence * (1.0 - opacity) + extFluence * opacity;
+    const float TWO_PI = 6.28318530718;
+    imageStore(bounceOut, ivec2(x, y), vec4(fluence * albedo / TWO_PI, 0.0));
+}

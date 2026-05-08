@@ -1,0 +1,188 @@
+#version 450
+
+// HRC Phase C: Cascade Merge — resolves fluence top-down.
+// At each level, merges per-probe ray data with far-field fluence from the
+// coarser level above. Even-probe Richardson extrapolation halves block error.
+// At level 0 (numDirections==1) writes into the fluence accumulation buffer.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// set=0: all read-only buffers → Compute::BindReadBuffer(0, ...) and BindReadBuffer(1, ...)
+layout(set = 0, binding = 0) readonly buffer RayBuf  { uvec2 data[]; } rayBuf;
+layout(set = 0, binding = 1) readonly buffer MergeIn { uint  data[]; } mergeIn;
+
+// set=1: all rw buffers → Compute::BindReadWriteBuffer(0, ...) and BindReadWriteBuffer(1, ...)
+layout(set = 1, binding = 0) buffer MergeOut  { uint data[]; } mergeOut;
+layout(set = 1, binding = 1) buffer FluenceOut { uint data[]; } fluenceOut;
+
+// set=2: uniform → Compute::PushUniform(0, ...)
+layout(set = 2, binding = 0) uniform MergeUniforms {
+    uint  probeCount;
+    uint  numDirections;
+    uint  levelProbes;
+    uint  numRays;
+    uint  isTopCascade;   // 1 = use ambient, no mergeIn read
+    uint  fluenceW;
+    uint  fluenceStride;
+    uint  level;
+    uint  mergeStride;
+    uint  mergeInWidth;
+    uint  direction;      // 0=E,1=N,2=W,3=S
+    uint  fluenceH;
+    uint  sliceCount;
+    float ambientR;
+    float ambientG;
+    float ambientB;
+    uint  clearFluence;   // 1 = write, 0 = accumulate (used at level 0 for first direction)
+};
+
+// ── Packing helpers ──
+
+vec4 unpackF16(uvec2 p) {
+    return vec4(unpackHalf2x16(p.x), unpackHalf2x16(p.y));
+}
+
+uint packRGB9E5(vec3 c) {
+    float maxC = max(c.r, max(c.g, c.b));
+    int   e;
+    float scale;
+    if (maxC < 6.10352e-5) { e = 0; scale = 0.0; }
+    else {
+        e = clamp(int(ceil(log2(maxC))) + 15, 0, 31);
+        scale = exp2(float(-e + 15 + 9));
+    }
+    uint r = uint(clamp(c.r * scale, 0.0, 511.0));
+    uint g = uint(clamp(c.g * scale, 0.0, 511.0));
+    uint b = uint(clamp(c.b * scale, 0.0, 511.0));
+    return r | (g << 9u) | (b << 18u) | (uint(e) << 27u);
+}
+
+vec3 unpackRGB9E5(uint p) {
+    float r = float(p & 0x1FFu);
+    float g = float((p >> 9u)  & 0x1FFu);
+    float b = float((p >> 18u) & 0x1FFu);
+    float e = float((p >> 27u) & 0x1Fu) - 15.0 - 9.0;
+    return vec3(r, g, b) * exp2(e);
+}
+
+// ── Data loaders ──
+
+struct RayData { vec3 rad; float trans; };
+
+// Ambient sky normalised by numDirections so the cascade doubling (2 sides × N levels)
+// integrates back to exactly ambientColor at level 0. Without this, a scene with
+// numCascades=9 produces 2^9 × ambient before the /TWO_PI blit factor.
+vec3 skyNorm() {
+    return vec3(ambientR, ambientG, ambientB) / float(numDirections);
+}
+
+RayData loadRay(int probeIdx, int rayIdx, int sliceIdx) {
+    if (probeIdx < 0 || probeIdx >= int(levelProbes) ||
+        rayIdx   < 0 || rayIdx   >= int(numRays)     ||
+        sliceIdx < 0 || sliceIdx >= int(sliceCount)) {
+        return RayData(vec3(0.0), 1.0);
+    }
+    int texX, rowW;
+    if (level == 0u) {
+        texX = probeIdx;
+        rowW = int(levelProbes);
+    } else {
+        texX = (probeIdx << int(level)) + probeIdx + rayIdx;
+        rowW = int(levelProbes * numRays);
+    }
+    vec4 r = unpackF16(rayBuf.data[sliceIdx * rowW + texX]);
+    return RayData(r.rgb, r.a);
+}
+
+vec3 loadMergeIn(int texX, int sliceIdx) {
+    if (isTopCascade == 1u ||
+        texX < 0 || texX >= int(mergeInWidth) ||
+        sliceIdx < 0 || sliceIdx >= int(sliceCount)) {
+        return skyNorm();
+    }
+    return unpackRGB9E5(mergeIn.data[sliceIdx * int(mergeStride) + texX]);
+}
+
+float coneArc(int subBin, int nd) {
+    float d  = float(nd * 2);
+    float lo = float(subBin * 2    ) - d;
+    float hi = float(subBin * 2 + 2) - d;
+    return atan(hi / d) - atan(lo / d);
+}
+
+int dirToSliceOffset(int dirIdx, int intervalSize) {
+    return dirIdx * 2 - intervalSize;
+}
+
+void main() {
+    int probeAngIdx = int(gl_GlobalInvocationID.x);
+    int sliceIdx    = int(gl_GlobalInvocationID.y);
+
+    int nd        = int(numDirections);
+    int probeIdx  = probeAngIdx >> int(level);
+    int angBinIdx = probeAngIdx & (nd - 1);
+
+    if (probeIdx >= int(levelProbes) || sliceIdx >= int(sliceCount)) return;
+
+    bool isEven  = (probeIdx % 2 == 0);
+    int  farStep = isEven ? 2 : 1;
+
+    vec3 result = vec3(0.0);
+
+    for (int side = 0; side < 2; side++) {
+        int   subBin  = angBinIdx * 2 + side;
+        int   rayIdx  = angBinIdx + side;
+        float weight  = coneArc(subBin, nd);
+
+        RayData ray      = loadRay(probeIdx, rayIdx, sliceIdx);
+        int     sliceOff = dirToSliceOffset(rayIdx, nd);
+        int     farX     = ((probeIdx + farStep) << int(level)) + subBin;
+        int     farSlice = sliceIdx + sliceOff * farStep;
+
+        vec3 farFluence;
+        if (isTopCascade == 1u ||
+            farX < 0 || farX >= int(mergeInWidth) ||
+            farSlice < 0 || farSlice >= int(sliceCount)) {
+            farFluence = skyNorm();
+        } else {
+            farFluence = unpackRGB9E5(mergeIn.data[farSlice * int(mergeStride) + farX]);
+        }
+
+        if (isEven) {
+            RayData ext   = loadRay(probeIdx + 1, rayIdx, sliceIdx + sliceOff);
+            vec3  cRad    = ray.rad + ext.rad * ray.trans;
+            float cTrans  = ray.trans * ext.trans;
+            vec3  merged  = cRad * weight + farFluence * cTrans;
+            vec3  coarse  = loadMergeIn((probeIdx << int(level)) + subBin, sliceIdx);
+            result += (merged + coarse) * 0.5;
+        } else {
+            result += ray.rad * weight + farFluence * ray.trans;
+        }
+    }
+
+    int outX = (probeIdx << int(level)) + angBinIdx;
+
+    if (numDirections > 1u) {
+        mergeOut.data[sliceIdx * int(mergeStride) + outX] = packRGB9E5(result);
+    }
+
+    if (numDirections == 1u) {
+        ivec2 fc;
+        switch (direction) {
+            case 0u: fc = ivec2(probeIdx - 1,              sliceIdx);             break; // E
+            case 1u: fc = ivec2(sliceIdx,                  probeIdx - 1);         break; // N
+            case 2u: fc = ivec2(int(fluenceW) - probeIdx,  sliceIdx);             break; // W
+            case 3u: fc = ivec2(sliceIdx,                  int(fluenceH) - probeIdx); break; // S
+            default: fc = ivec2(probeIdx - 1,              sliceIdx);             break;
+        }
+        if (fc.x >= 0 && fc.x < int(fluenceW) && fc.y >= 0 && fc.y < int(fluenceH)) {
+            int fi = fc.y * int(fluenceStride) + fc.x;
+            if (clearFluence == 1u) {
+                fluenceOut.data[fi] = packRGB9E5(result);
+            } else {
+                vec3 prev = unpackRGB9E5(fluenceOut.data[fi]);
+                fluenceOut.data[fi] = packRGB9E5(prev + result);
+            }
+        }
+    }
+}

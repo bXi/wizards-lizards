@@ -1,0 +1,71 @@
+#version 450
+
+// HRC Fluence Blur — opacity-aware 1px cross blur on the fluence SSBO.
+// Kernel [0,1,0 / 1,4,1 / 0,1,0] / 8, skipping neighbors whose opacity
+// differs too much from center. Cancels even/odd merge checkerboard artifacts.
+// Converts RGB9E5 SSBO → rgba16f storage texture for sampling in the blit pass.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// set=0: all read-only resources → BindReadTexture(0, ...) and BindReadBuffer(0, ...)
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D worldTex;
+layout(set = 0, binding = 1) readonly buffer FluenceSrc { uint data[]; } src;
+
+// set=1: all rw resources → BindReadWriteTexture(0, ...)
+layout(set = 1, binding = 0, rgba16f) uniform image2D dstTex;
+
+// set=2: uniform → Compute::PushUniform(0, ...)
+layout(set = 2, binding = 0) uniform BlurUniforms {
+    uint w;
+    uint h;
+    uint stride;
+    uint screenW;
+    uint screenH;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+vec3 unpackRGB9E5(uint p) {
+    float r = float(p & 0x1FFu);
+    float g = float((p >> 9u)  & 0x1FFu);
+    float b = float((p >> 18u) & 0x1FFu);
+    float e = float((p >> 27u) & 0x1Fu) - 15.0 - 9.0;
+    return vec3(r, g, b) * exp2(e);
+}
+
+vec3 loadFluence(int x, int y) {
+    return unpackRGB9E5(src.data[y * int(stride) + x]);
+}
+
+float probeOpacity(int px, int py, float spacing) {
+    ivec2 wp = ivec2(vec2(float(px) + 0.5, float(py) + 0.5) * spacing);
+    wp = clamp(wp, ivec2(0), ivec2(int(screenW) - 1, int(screenH) - 1));
+    return imageLoad(worldTex, wp).a;
+}
+
+void main() {
+    int x = int(gl_GlobalInvocationID.x);
+    int y = int(gl_GlobalInvocationID.y);
+    if (x >= int(w) || y >= int(h)) return;
+
+    float spacing = float(screenW) / float(w);
+    float centerOpacity = probeOpacity(x, y, spacing);
+    vec3  center = loadFluence(x, y);
+
+    vec3  sum = center * 4.0;
+    float wt  = 4.0;
+
+    const ivec2 off[4] = ivec2[4](ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1));
+    for (int i = 0; i < 4; i++) {
+        int nx = clamp(x + off[i].x, 0, int(w) - 1);
+        int ny = clamp(y + off[i].y, 0, int(h) - 1);
+        float nOpacity = probeOpacity(nx, ny, spacing);
+        if (abs(nOpacity - centerOpacity) < 0.5) {
+            sum += loadFluence(nx, ny);
+            wt  += 1.0;
+        }
+    }
+
+    imageStore(dstTex, ivec2(x, y), vec4(sum / wt, 1.0));
+}

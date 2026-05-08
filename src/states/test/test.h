@@ -13,14 +13,10 @@
 #include <utils/helpers.h>
 #include <utils/camera.h>
 
-#include "input/inputhandler.h"
-#include "audio/audiohandler.h"
-#include "fonts/fonthandler.h"
-#include "render2d/render2dhandler.h"
-
 #include "map/newdungeon.h"
+#include "entities/mirrorblock.h"
 
-#include "texture/texturehandler.h"
+#include <luminoveau.h>
 
 #include "box2d/box2d.h"
 #include "box2dobjects.h"
@@ -42,7 +38,6 @@ enum class Test
 	Audio,
 	Dungeon,
 	LineIntersect,
-	Box2D,
     Render2D,
 	Random,
     J9X_Geom
@@ -58,9 +53,9 @@ public:
 	void draw(int x, int y)
 	{
 		if (intersects)
-			Render2D::DrawCircle({x + pos.x, y + pos.y}, 2.0f, GREEN);
+			Draw::Circle({x + pos.x, y + pos.y}, 2.0f, GREEN);
 		else
-			Render2D::DrawCircle({x + pos.x, y + pos.y}, 2.0f, RED);
+			Draw::Circle({x + pos.x, y + pos.y}, 2.0f, RED);
 
 	}
 
@@ -75,7 +70,6 @@ class TestState : public BaseState {
 		{Test::Audio, "Audio"},
 		{Test::Dungeon, "Dungeon"},
 		{Test::LineIntersect, "LineIntersect"},
-		{Test::Box2D, "Box2D"},
 		{Test::Render2D, "Render2D"},
 		{Test::Random, "Random"},
         {Test::J9X_Geom, "Javids Geom"},
@@ -87,16 +81,15 @@ class TestState : public BaseState {
 		{SDLK_3, Test::Audio},
 		{SDLK_4, Test::Dungeon},
 		{SDLK_5, Test::LineIntersect},
-		{SDLK_6, Test::Box2D},
-		{SDLK_7, Test::Render2D},
-		{SDLK_8, Test::Random},
-        {SDLK_9, Test::J9X_Geom},
+		{SDLK_6, Test::Render2D},
+		{SDLK_7, Test::Random},
+        {SDLK_8, Test::J9X_Geom},
 	};
 
 	//quadtree
 	std::vector<Testpoint*> testPoints;
 	Testpoint* entity = nullptr;
-	Test selected = Test::Render2D;
+	Test selected = Test::Random;
 	int size = 600;
 	bool isCircle = false;
 
@@ -107,21 +100,32 @@ class TestState : public BaseState {
 	DungeonGen* dg = nullptr;
 	bool showLines = true;
 
-    //Box2D
-	rectf scissorArea = {0, 0, 300, 300 };
-	std::vector<PhysicsObject*> Objects;
+    // Mirror puzzle visualizer
+    MirrorPuzzleData puzzleViz;
+    bool hasVizPuzzle    = false;
+    bool showVizSolution = true;
 
-    vf2d groundSize = { 100, 2 };    // save a vector of our ground size, so we know what to draw
-	float accumulator = 0;
-	float physTime = 1 / 160.0f;
-	int32 velocityIterations = 6;
-	int32 positionIterations = 2;
+    struct BlockStats {
+        int puzzleCount = 0;
+        // Emitters
+        int emitRed = 0, emitGreen = 0, emitBlue = 0, emitWhite = 0;
+        // Mirrors: slash vs backslash × no-rail / H-rail / V-rail
+        int mirSlashNone = 0, mirSlashH = 0, mirSlashV = 0;
+        int mirBsNone    = 0, mirBsH    = 0, mirBsV    = 0;
+        // Splitters & combiners
+        int splitters = 0, combiners = 0;
+        // Receptors by required color
+        int recRed = 0, recGreen = 0, recBlue = 0;
+        int recYellow = 0, recMagenta = 0, recCyan = 0, recWhite = 0;
+        // Barrier wall tiles
+        int barrierTiles = 0;
+    };
+    BlockStats blockStats;
 
-    Texture dungeonTileset;
+
+    TextureAsset dungeonTileset;
 
 //	Camera cam = { {0.f, 0.f} };
-	BoxObject ground = BoxObject({ 0, 0 }, { 200, 2 }, BROWN, 0, false);
-    float testPercentage = 0.5;
 
     size_t nSelectedShapeIndex = -1;
 
@@ -244,38 +248,38 @@ olc::vi2d vOldMousePos;
 	void draw_internal(const Point& x, const Color col)
 	{
 		const auto p = make_internal(x);
-		Render2D::DrawPixel({(int)p.x, (int)p.y}, col);
+		Draw::Pixel({(int)p.x, (int)p.y}, col);
 	}
 
 	void draw_internal(const Line& x, const Color col)
 	{
 		const auto l = make_internal(x);
-		Render2D::DrawLine({l.start.x, l.start.y}, {l.end.x, l.end.y}, col);
+		Draw::Line({l.start.x, l.start.y}, {l.end.x, l.end.y}, col);
 	}
 
 	void draw_internal(const Rect& x, const Color col)
 	{
 		const auto r = make_internal(x);
-		Render2D::DrawRectangle({r.pos.x, r.pos.y}, {r.size.x, r.size.y}, col);
+		Draw::Rectangle({r.pos.x, r.pos.y}, {r.size.x, r.size.y}, col);
 	}
 
 	void draw_internal(const Circle& x, const Color col)
 	{
 		const auto c = make_internal(x);
-		Render2D::DrawCircle({c.pos.x, c.pos.y}, int32_t(c.radius), col);
+		Draw::Circle({c.pos.x, c.pos.y}, int32_t(c.radius), col);
 	}
 
 	void draw_internal(const Triangle& x, const Color col)
 	{
 		const auto t = make_internal(x);
-		Render2D::DrawTriangle({t.pos[0].x, t.pos[0].y}, {t.pos[1].x, t.pos[1].y}, {t.pos[2].x, t.pos[2].y}, col);
+		Draw::Triangle({t.pos[0].x, t.pos[0].y}, {t.pos[1].x, t.pos[1].y}, {t.pos[2].x, t.pos[2].y}, col);
 	}
 
 	void draw_internal(const Ray& x, const Color col)
 	{
 		const auto t = make_internal(x);
         auto lend = t.origin+t.direction * 1000.0f;
-        Render2D::DrawLine({t.origin.x, t.origin.y}, {lend.x, lend.y}, col);
+        Draw::Line({t.origin.x, t.origin.y}, {lend.x, lend.y}, col);
 
 	}
 

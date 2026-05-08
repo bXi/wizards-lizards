@@ -2,10 +2,8 @@
 
 #include "menustructure.h"
 
-#include "configuration/configuration.h"
-#include "settings/settingshandler.h"
-#include "audio/audiohandler.h"
-#include "input/inputhandler.h"
+#include "luminoveau.h"
+
 #include <state/basestate.h>
 
 class MenuState : public BaseState {

@@ -1,19 +1,20 @@
 
 #include <utils/helpers.h>
 #include "menu.h"
+#include "configuration.h"
 #include "settings/settingshandler.h"
 #include "state/state.h"
 
 void MenuState::load()
 {
 
-	Audio::GetMusic("assets/music/menu.mp3");
+	AssetHandler::GetMusic("assets/music/menu.mp3");
 //
-	Audio::GetSound("assets/sfx/cursor.wav");
-	Audio::GetSound("assets/sfx/confirm.wav");
+	AssetHandler::GetSound("assets/sfx/cursor.wav");
+	AssetHandler::GetSound("assets/sfx/confirm.wav");
 
 	mo["main"].SetTable(1, 6);
-	mo["main"]["Start game"].setCallback([&]() { State::SetState("game"); });
+	mo["main"]["Start game"].setCallback([&]() { State::SetState("lobby"); });
 
 	mo["main"]["Options"].SetTable(1, 6);
 
@@ -42,7 +43,7 @@ void MenuState::load()
 
 	mo["main"]["Options"]["Video"]["Fullscreen"].setCallback([&mo = mo]() {
 
-		Settings::toggleFullscreen();
+		Window::ToggleFullscreen();
 		mo["main"]["Options"]["Video"]["Fullscreen"].setActive(Window::IsFullscreen());
 		}).setActive(Window::IsFullscreen());
 
@@ -69,7 +70,7 @@ void MenuState::load()
 
     mm.Open(&mo["main"]);
 
-    Audio::PlayMusic("assets/music/menu.mp3");
+    Audio::PlayMusic(AssetHandler::GetMusic("assets/music/menu.mp3"));
 
 
 
@@ -90,7 +91,7 @@ void MenuState::draw()
 	const int leftMargin = Window::GetWidth() / 10;
 	const int topMargin = Window::GetHeight() / 10;
 
-	Fonts::DrawText("assets/fonts/APL386.ttf", 72, {(float)leftMargin, (float)topMargin}, "Wizards & Lizards", WHITE);
+    Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {(float)leftMargin, (float)topMargin}, "Wizards & Lizards", WHITE);
 
 	menuobject* command = nullptr;
 
@@ -102,12 +103,12 @@ void MenuState::draw()
 
 	for (auto& input : inputs)
 	{
-		if (input->is(Buttons::UP,     Action::PRESSED)) { Audio::PlaySound("assets/sfx/cursor.wav");  mm.OnUp(); }
-		if (input->is(Buttons::DOWN,   Action::PRESSED)) { Audio::PlaySound("assets/sfx/cursor.wav");  mm.OnDown(); }
-		if (input->is(Buttons::LEFT,   Action::PRESSED)) { Audio::PlaySound("assets/sfx/cursor.wav");  doVolume = true; }
-		if (input->is(Buttons::RIGHT,  Action::PRESSED)) { Audio::PlaySound("assets/sfx/cursor.wav");  doVolume = true; }
-		if (input->is(Buttons::ACCEPT, Action::PRESSED)) { Audio::PlaySound("assets/sfx/confirm.wav"); command = mm.OnConfirm(); }
-		if (input->is(Buttons::BACK,   Action::PRESSED)) { Audio::PlaySound("assets/sfx/cursor.wav");  mm.OnBack(); }
+		if (input->is(Buttons::UP,     Action::PRESSED)) { Audio::PlaySound(AssetHandler::GetSound("assets/sfx/cursor.wav"));  mm.OnUp(); }
+		if (input->is(Buttons::DOWN,   Action::PRESSED)) { Audio::PlaySound(AssetHandler::GetSound("assets/sfx/cursor.wav"));  mm.OnDown(); }
+		if (input->is(Buttons::LEFT,   Action::PRESSED)) { Audio::PlaySound(AssetHandler::GetSound("assets/sfx/cursor.wav"));  doVolume = true; }
+		if (input->is(Buttons::RIGHT,  Action::PRESSED)) { Audio::PlaySound(AssetHandler::GetSound("assets/sfx/cursor.wav"));  doVolume = true; }
+		if (input->is(Buttons::ACCEPT, Action::PRESSED)) { Audio::PlaySound(AssetHandler::GetSound("assets/sfx/confirm.wav")); command = mm.OnConfirm(); }
+		if (input->is(Buttons::BACK,   Action::PRESSED)) { Audio::PlaySound(AssetHandler::GetSound("assets/sfx/cursor.wav"));  mm.OnBack(); }
 
 		volumeModifier = input->is(Buttons::LEFT, Action::PRESSED) ? -0.05f : 0.05f;
 	}
@@ -144,7 +145,7 @@ void MenuState::draw()
 	int baseY = 300;
 
 	if (Configuration::showFPS) {
-		Fonts::DrawText("assets/fonts/APL386.ttf", 18, {(float)baseX, (float)baseY}, Helpers::TextFormat("%d", Window::GetFPS()), GREEN);
+        Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {(float)baseX, (float)baseY}, Helpers::TextFormat("%d", Window::GetFPS()), GREEN);
 	}
 
 	if (command != nullptr)

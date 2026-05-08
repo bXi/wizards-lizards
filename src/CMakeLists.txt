@@ -17,9 +17,17 @@ target_sources(${EXECUTABLE_NAME} PRIVATE
         components/owner.h
         components/playerclass.cpp
         components/playerclass.h
+        components/damageaccumulator.h
+        components/floatingnumber.h
+        components/chainlightningdata.h
+        components/fragmentdata.h
+        components/spriteeffect.h
+        components/whirlwindobjectdata.h
         components/playerindex.h
         components/playerinput.h
+        components/playerxp.h
         components/radius.h
+        components/timewarpdata.h
         components/render2d.cpp
         components/render2d.h
         components/debugrigidbody2d.cpp
@@ -28,8 +36,10 @@ target_sources(${EXECUTABLE_NAME} PRIVATE
         components/sprite.h
         components/type.h
         components/weapon.h
+        configuration.h
         ecs.h
         entities/classes/baseclass.h
+        entities/classes/berserker.cpp
         entities/classes/berserker.h
         entities/classes/bouncer.h
         entities/classes/trapper.h
@@ -37,16 +47,28 @@ target_sources(${EXECUTABLE_NAME} PRIVATE
         entities/classes/wizard.h
         entities/fireball.cpp
         entities/fireball.h
+        entities/whirlwindobject.cpp
+        entities/whirlwindobject.h
         entities/lizard.cpp
         entities/lizard.h
         entities/physicsobject.h
         entities/gate.cpp
         entities/gate.h
+        entities/puzzleblock.cpp
+        entities/puzzleblock.h
+        entities/mirrorblock.cpp
+        entities/mirrorblock.h
+        entities/pressureplate.cpp
+        entities/pressureplate.h
         entities/roomsensor.cpp
         entities/roomsensor.h
         entities/player.cpp
         entities/player.h
         entities/spawner.h
+        entities/fragment.cpp
+        entities/fragment.h
+        entities/timewarp.cpp
+        entities/timewarp.h
         main.cpp
         main.h
         map/dungeon.h
@@ -56,8 +78,11 @@ target_sources(${EXECUTABLE_NAME} PRIVATE
         map/newdungeon.h
         map/tile.h
         map/room.h
+        lobbyconfig.h
         states/game/game.cpp
         states/game/game.h
+        states/lobby/lobby.cpp
+        states/lobby/lobby.h
 #        states/intro/intro.cpp
 #        states/intro/intro.h
         states/menu/menu.cpp
@@ -71,6 +96,10 @@ target_sources(${EXECUTABLE_NAME} PRIVATE
         ui/ui.h
         world/world.cpp
         world/world.h
+
+
+        extra/LightLayer.cpp
+        extra/LightLayer.h
 )
 
 if (CMAKE_BUILD_TYPE STREQUAL Release)
@@ -100,8 +129,13 @@ set_target_properties(${EXECUTABLE_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR}
 )
 
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${EXECUTABLE_NAME})
+
 target_include_directories(${EXECUTABLE_NAME} PRIVATE .)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE libs)
-target_compile_options(${EXECUTABLE_NAME} PRIVATE -Wall)
-target_compile_options(${EXECUTABLE_NAME} PRIVATE -Wno-unused-command-line-argument)
+if(MSVC)
+    target_compile_options(${EXECUTABLE_NAME} PRIVATE /W3)
+else()
+    target_compile_options(${EXECUTABLE_NAME} PRIVATE -Wall)
+endif()
 target_compile_features(${EXECUTABLE_NAME} PRIVATE cxx_std_23)

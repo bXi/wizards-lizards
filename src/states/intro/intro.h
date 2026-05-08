@@ -1,8 +1,8 @@
 #pragma once
 
 #include <algorithm>
-#include "configuration/configuration.h"
-#include "texture/texturehandler.h"
+#include "luminoveau.h"
+
 #include "utils/lerp.h"
 #include <state/basestate.h>
 

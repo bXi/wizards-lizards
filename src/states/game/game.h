@@ -2,29 +2,43 @@
 
 #include <list>
 #include <cstring>
+#include <set>
+#include <map>
 
 #include <utils/helpers.h>
 #include <utils/lerp.h>
 
-#include <input/inputhandler.h>
-#include <fonts/fonthandler.h>
-#include <settings/settingshandler.h>
-#include <log/loghandler.h>
+#include "luminoveau.h"
+#include "configuration.h"
+
 
 #include "entities/spawner.h"
 
-#include <configuration/configuration.h>
 
 #include "entities/player.h"
 #include "entities/lizard.h"
 #include "entities/gate.h"
 #include "entities/roomsensor.h"
+#include "entities/pressureplate.h"
+#include "entities/puzzleblock.h"
+#include "entities/mirrorblock.h"
 
 #include "world/world.h"
 #include "map/room.h"
 #include "map/levelmanager.h"
 
 #include <state/basestate.h>
+#include "components/damageaccumulator.h"
+#include "components/spriteeffect.h"
+#include "components/floatingnumber.h"
+#include "components/playerxp.h"
+#include "components/timewarpdata.h"
+#include "components/fragmentdata.h"
+#include "components/chainlightningdata.h"
+#include "components/whirlwindobjectdata.h"
+#include "entities/timewarp.h"
+#include "entities/fragment.h"
+#include "entities/whirlwindobject.h"
 //#include "entities/powerup.h"
 inline auto doCirclesOverlap = [](float x1, float y1, float r1, float x2, float y2, float r2)
 {
@@ -36,8 +50,6 @@ private:
 
 	float accumulator = 0;
 	float physTime = 1.f; // static_cast<float>(Settings::getMonitorRefreshRate());
-	int32 velocityIterations = 6;
-	int32 positionIterations = 2;
 
 	//Music backgroundMusic;
 
@@ -58,7 +70,7 @@ private:
 
 
     int widthMargin = 5, heightMargin = 5;
-	Texture currentLevelTexture;
+	TextureAsset currentLevelTexture;
 
 	std::vector<Room*> rooms;
 	LerpAnimator* roomTitleLerp = nullptr;
@@ -70,8 +82,19 @@ private:
 	Room* currentRoom = nullptr;
 	Room* lastRoom = nullptr;
 
+    // Per-player hue shift effects (P1=no shift, P2=+120°, P3=+240°, P4=+180°)
+    ShaderAsset huePassthroughVert;
+    ShaderAsset hueShiftFrag;
+    EffectAsset playerHueEffects[4];
+
+    // Zelda-style room pan
+    bool isPanning = false;
+    float panTimer = 0.f;
+    static constexpr float PAN_DURATION = 0.45f;
+    vf2d panFrom = {};
+    vf2d panTo = {};
+
 	bool miniMapVisible = false;
-    Texture minimapTexture;
     int miniMapSize = 201;
 
 public:
@@ -89,7 +112,18 @@ public:
 	void update();
 	void drawEntities();
 
-    Texture dungeonTileset;
+    void checkPuzzleMatches(int roomId);
+    void resetPuzzle(int roomId);
+    void checkMirrorPuzzle(int roomId);
+    std::set<int> puzzleSolvedRooms;
+    std::set<int> mirrorPuzzleSolvedRooms;
+    std::map<int, std::vector<std::pair<vf2d, int>>> puzzleInitialState; // roomId → [(tilePos, colorIdx)]
+    std::map<int, float> puzzleResetTimers; // roomId → seconds all plates held
+    std::map<int, std::vector<BeamSegment>> roomBeamSegments; // rebuilt each frame for rendering
+
+    std::vector<FloatingNumberData> floatingNumbers;
+
+    TextureAsset dungeonTileset;
     DungeonTileData tileData;
 
     rectf getRectangle(int _x, int _y)

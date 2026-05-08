@@ -2,8 +2,8 @@
 
 
 #include "state/state.h"
-#include "configuration/configuration.h"
-#include "input/inputhandler.h"
+#include "luminoveau.h"
+
 
 
 #include "ecs.h"

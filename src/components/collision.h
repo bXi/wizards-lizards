@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <vector>
 
 #include "rigidbody2d.h"
 
@@ -20,18 +21,17 @@ struct Collision
 
 	void init(flecs::entity* entity)
 	{
-		auto* rigidBody = entity->get_mut<RigidBody2D>()->RigidBody;
+		b2BodyId rigidBody = entity->get_mut<RigidBody2D>()->RigidBody;
 
-
-		b2Filter filter;
+		b2Filter filter = b2DefaultFilter();
 		filter.categoryBits = category;
 		filter.maskBits = mask;
 
-		// Set the collision filtering for all fixtures
-		b2Fixture* fixture = rigidBody->GetFixtureList();
-		while (fixture != nullptr) {
-			fixture->SetFilterData(filter);
-			fixture = fixture->GetNext();
+		int shapeCount = b2Body_GetShapeCount(rigidBody);
+		std::vector<b2ShapeId> shapes(shapeCount);
+		b2Body_GetShapes(rigidBody, shapes.data(), shapeCount);
+		for (b2ShapeId shapeId : shapes) {
+			b2Shape_SetFilter(shapeId, filter);
 		}
 	}
 	

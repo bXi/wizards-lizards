@@ -16,30 +16,32 @@ struct GateEntity {
     int roomId = -1;
     bool closed = true;
     float openTimer = 0.f;
+    b2ShapeId shapeId = b2_nullShapeId;
+
+    void _recreateShape(b2BodyId bodyId, bool isSensor) {
+        if (b2Shape_IsValid(shapeId)) {
+            b2DestroyShape(shapeId, false);
+        }
+        b2ShapeDef shapeDef = b2DefaultShapeDef();
+        shapeDef.isSensor = isSensor;
+        shapeDef.density = 1.0f;
+        b2Polygon box = b2MakeBox(0.5f, 0.5f);
+        shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &box);
+    }
 
     void close(flecs::entity entity) {
         entity.get_mut<GateEntity>()->closed = true;
-
         entity.get_mut<RenderFrame>()->RenderFrameNumber = 20;
-
-        auto fixtures = entity.get_mut<RigidBody2D>()->RigidBody->GetFixtureList();
-        for (b2Fixture* fixture = fixtures; fixture; fixture = fixture->GetNext()) {
-            fixture->SetSensor(false);
-        }
-
+        b2BodyId bodyId = entity.get_mut<RigidBody2D>()->RigidBody;
+        entity.get_mut<GateEntity>()->_recreateShape(bodyId, false);
         entity.get_mut<DeleteBulletsOnHit>()->disable = false;
-
     }
+
     void open(flecs::entity entity) {
         entity.get_mut<GateEntity>()->closed = false;
-
         entity.get_mut<RenderFrame>()->RenderFrameNumber = 16;
-
-        auto fixtures = entity.get_mut<RigidBody2D>()->RigidBody->GetFixtureList();
-        for (b2Fixture* fixture = fixtures; fixture; fixture = fixture->GetNext()) {
-            fixture->SetSensor(true);
-        }
-
+        b2BodyId bodyId = entity.get_mut<RigidBody2D>()->RigidBody;
+        entity.get_mut<GateEntity>()->_recreateShape(bodyId, true);
         entity.get_mut<DeleteBulletsOnHit>()->disable = true;
     }
 };

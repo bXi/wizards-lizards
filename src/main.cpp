@@ -1,4 +1,5 @@
 #include "main.h"
+#include "states/lobby/lobby.h"
 
 #ifdef __EMSCRIPTEN__
 #include "emscripten.h"
@@ -36,16 +37,20 @@ int main(int argc, char* argv[])
 	Input::Init();
 	ECS::init();
 
-    BaseState* testState = new TestState;
-    State::AddState("test", testState);
 
     BaseState* menuState = new MenuState;
     State::AddState("menu", menuState);
 
+    BaseState* lobbyState = new LobbyState;
+    State::AddState("lobby", lobbyState);
+
     BaseState* gameState = new GameState;
     State::AddState("game", gameState);
 
-    State::Init("menu");
+    BaseState* testState = new TestState;
+    State::AddState("test", testState);
+
+    State::Init("test");
 
 
 

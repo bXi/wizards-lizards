@@ -1,7 +1,21 @@
 #include "wizard.h"
+#include "configuration.h"
+#include <algorithm>
+#include <set>
 
 #include "components/health.h"
+#include "components/damageaccumulator.h"
 #include "entities/fireball.h"
+#include "entities/timewarp.h"
+#include "components/timewarpdata.h"
+#include "entities/fragment.h"
+#include "components/fragmentdata.h"
+#include "entities/puzzleblock.h"
+#include "entities/mirrorblock.h"
+#include "components/pushable.h"
+
+
+#include "extra/LightLayer.h"
 
 
 void WizardClass::update()
@@ -11,6 +25,8 @@ void WizardClass::update()
 	//spriteTimer += delta;
 	secondsSinceLastShot -= delta;
 	laserLastDamageTick -= delta;
+	secondsSinceLastWarp -= delta;
+	secondsSinceLastFragment -= delta;
 	hitTimer -= delta;
 
 }
@@ -30,9 +46,13 @@ void WizardClass::shoot(flecs::entity entity)
 
 	auto dungeon = World::getDungeon();
 
-
-	auto pos = rigidBody2d->RigidBody->GetPosition();
+	b2Vec2 pos = b2Body_GetPosition(rigidBody2d->RigidBody);
 	auto aim = player->aim;
+
+	if (m_laserParticlesInited) {
+		for (auto& h : m_laserHitParticles)
+			Particles::Stop(h);
+	}
 
 	switch (player->selectedWeapon) {
 	case 1:
@@ -43,9 +63,11 @@ void WizardClass::shoot(flecs::entity entity)
 
 			secondsSinceLastShot = 0.2f - (static_cast<float>(speed) / 200.0f);
 
+
+
 			auto shootFireball = [&](const vf2d &_aim)
 			{
-				CreateFireballEntity(&entity, pos - vf2d(0.5f, 0.5f), (_aim / vi2d{ Configuration::tileWidth, Configuration::tileHeight }));
+				CreateFireballEntity(&entity, vf2d{pos.x - 0.5f, pos.y - 0.5f}, (_aim / vi2d{ Configuration::tileWidth, Configuration::tileHeight }));
 			};
 
 			spread++;
@@ -90,174 +112,148 @@ void WizardClass::shoot(flecs::entity entity)
 	{
 		auto [damage, bounces, beamwidth] = player->getPowerUp(1);
 
-		vf2d startPosition = {
-			pos.x - 0.5f,
-			pos.y - 0.5f
+		// Solid stops: color puzzle blocks
+		std::set<std::pair<int,int>> blockTiles;
+		ECS::getWorld().filter<PuzzleBlock, Pushable, RigidBody2D>().each([&](flecs::entity, PuzzleBlock& pb, Pushable& pp, RigidBody2D& brb) {
+			if (pb.fadingOut) return;
+			b2Vec2 bp = b2Body_GetPosition(brb.RigidBody);
+			int tx = pp.isMoving ? (int)roundf(pp.targetPos.x - 0.5f) : (int)roundf(bp.x - 0.5f);
+			int ty = pp.isMoving ? (int)roundf(pp.targetPos.y - 0.5f) : (int)roundf(bp.y - 0.5f);
+			blockTiles.insert({tx, ty});
+		});
+
+		// Mirrors: reflect beam, don't count as wall bounces
+		std::map<std::pair<int,int>, MirrorBlock::Orientation> mirrorMap;
+		ECS::getWorld().filter<MirrorBlock, Pushable, RigidBody2D>().each([&](flecs::entity, MirrorBlock& mb, Pushable& mp, RigidBody2D& brb) {
+			b2Vec2 bp = b2Body_GetPosition(brb.RigidBody);
+			int tx = mp.isMoving ? (int)roundf(mp.targetPos.x - 0.5f) : (int)roundf(bp.x - 0.5f);
+			int ty = mp.isMoving ? (int)roundf(mp.targetPos.y - 0.5f) : (int)roundf(bp.y - 0.5f);
+			mirrorMap[{tx, ty}] = mb.orientation;
+		});
+
+		// Receptors: light up on hit, beam passes through
+		std::map<std::pair<int,int>, flecs::entity> receptorMap;
+		ECS::getWorld().filter<BeamReceptor>().each([&](flecs::entity e, BeamReceptor& br) {
+			receptorMap[{br.tilePos.x, br.tilePos.y}] = e;
+		});
+
+		// Beam blockers: solid interior pillars, stop DDA like walls
+		ECS::getWorld().filter<BeamBlocker>().each([&](flecs::entity, BeamBlocker& bb) {
+			blockTiles.insert({bb.tilePos.x, bb.tilePos.y});
+		});
+
+		// DDA helper: march from start in dir until wall/block/mirror/receptor.
+		// Returns {found, distance, lastHitX, hitTile}.
+		// Mirrors and receptors are found via mirrorMap/receptorMap checks inside loop.
+		enum HitType { HIT_WALL, HIT_MIRROR, HIT_RECEPTOR };
+		auto doDDA = [&](vf2d start, vf2d dir) -> std::tuple<bool, float, bool, vi2d, HitType> {
+			vf2d stepsize = {
+				sqrtf(1.f + (dir.y / dir.x) * (dir.y / dir.x)),
+				sqrtf(1.f + (dir.x / dir.y) * (dir.x / dir.y))
+			};
+			vi2d mc = { (int)start.x, (int)start.y };
+			vf2d rLen;
+			vi2d st;
+			if (dir.x < 0) { st.x = -1; rLen.x = (start.x - mc.x) * stepsize.x; }
+			else            { st.x =  1; rLen.x = (mc.x + 1 - start.x) * stepsize.x; }
+			if (dir.y < 0) { st.y = -1; rLen.y = (start.y - mc.y) * stepsize.y; }
+			else            { st.y =  1; rLen.y = (mc.y + 1 - start.y) * stepsize.y; }
+
+			bool found = false, lastHitX = false;
+			float dist = 0.f;
+			HitType hitType = HIT_WALL;
+
+			while (!found && dist < 250.f) {
+				if (rLen.x < rLen.y) { mc.x += st.x; dist = rLen.x; rLen.x += stepsize.x; lastHitX = true; }
+				else                  { mc.y += st.y; dist = rLen.y; rLen.y += stepsize.y; lastHitX = false; }
+
+				if (mc.x < 0 || mc.x >= dungeon.getWidth() || mc.y < 0 || mc.y >= dungeon.getHeight()) break;
+
+				if (mirrorMap.count({mc.x, mc.y})) {
+					found = true; hitType = HIT_MIRROR;
+				} else if (receptorMap.count({mc.x, mc.y})) {
+					found = true; hitType = HIT_RECEPTOR;
+				} else if (dungeon.getTile(mc.x, mc.y) == Tile::WALL ||
+				           dungeon.getTile(mc.x, mc.y) == Tile::VOID ||
+				           blockTiles.count({mc.x, mc.y})) {
+					found = true; hitType = HIT_WALL;
+				}
+			}
+			return { found, dist, lastHitX, mc, hitType };
 		};
 
-		vf2d rayDir = aim.norm();
-		vf2d stepsize = { sqrt(1 + (rayDir.y / rayDir.x) * (rayDir.y / rayDir.x)),
-						 sqrt(1 + (rayDir.x / rayDir.y) * (rayDir.x / rayDir.y)) };
-		vi2d mapCheck = startPosition;
-		vf2d rayLength1D;
-		vi2d step;
-
-		if (rayDir.x < 0) {
-			step.x = -1;
-			rayLength1D.x = (startPosition.x - static_cast<float>(mapCheck.x)) * stepsize.x;
+		if (!m_laserParticlesInited) {
+			static constexpr const char* kLaserHitPreset =
+				"djE6NTA2LDAsMTAzLDAsODUsMCwwLDAsMC4xLDcsNC43NywwLjUsNSwxLjUsMC41LDIwLDMuODYs"
+				"MCwwLjM3LDAsMCwxLDAuODYsMCwwLDAuOSwwLjgsMC4wNSwwLDAuNCwwLjMsMCwwLDAsMCwwLjE1"
+				"LDAuNSwx";
+			for (auto& h : m_laserHitParticles)
+				h = Particles::CreateSystemFromPreset(kLaserHitPreset, 500);
+			m_laserParticlesInited = true;
 		}
-		else {
-			step.x = 1;
-			rayLength1D.x = (static_cast<float>(mapCheck.x + 1) - startPosition.x) * stepsize.x;
-		}
-
-		if (rayDir.y < 0) {
-			step.y = -1;
-			rayLength1D.y = (startPosition.y - static_cast<float>(mapCheck.y)) * stepsize.y;
-		}
-		else {
-			step.y = 1;
-			rayLength1D.y = (static_cast<float>(mapCheck.y + 1) - startPosition.y) * stepsize.y;
-		}
-
-		bool lastHitX = false;
-
-		bool foundTile = false;
-		float maxDistance = 250.0f;
-		float distance = 0.0f;
-		while (!foundTile && distance < maxDistance) {
-			if (rayLength1D.x < rayLength1D.y) {
-				mapCheck.x += step.x;
-				distance = rayLength1D.x;
-				rayLength1D.x += stepsize.x;
-				lastHitX = true;
-			}
-			else {
-				mapCheck.y += step.y;
-				distance = rayLength1D.y;
-				rayLength1D.y += stepsize.y;
-				lastHitX = false;
-			}
-
-
-			if (mapCheck.x >= 0 && mapCheck.x < dungeon.getWidth() && mapCheck.y >= 0 && mapCheck.y < dungeon.getHeight()) {
-				if (dungeon.getTile(mapCheck.x, mapCheck.y) == Tile::WALL ||
-					dungeon.getTile(mapCheck.x, mapCheck.y) == Tile::VOID) {
-					foundTile = true;
-				}
-			}
-		}
-
+		m_wallHitPositions.clear();
 		vecLines.clear();
+		float radius = 1.0f * (4.0f * (1.0f + static_cast<float>(beamwidth))) / 32.0f;
 
-		vf2d hitWallNormal = { 0.0f, 0.0f };
+		vf2d startPosition = { pos.x - 0.5f, pos.y - 0.5f };
+		// Nudge off exact tile boundaries so the DDA never produces a zero-length first segment
+		// (when starting exactly on a boundary the initial rLen for the negative direction is 0,
+		//  giving hitPos == startPosition which causes ThickLine to receive a zero-length segment)
+		constexpr float DDA_EPS = 1e-4f;
+		if (std::fabs(startPosition.x - std::floor(startPosition.x)) < DDA_EPS) startPosition.x += DDA_EPS;
+		if (std::fabs(startPosition.y - std::floor(startPosition.y)) < DDA_EPS) startPosition.y += DDA_EPS;
+		vf2d rayDir = aim.norm();
+		// Unified bounce loop: mirrors are free, wall bounces cost from the `bounces` budget.
+		int wallBouncesLeft = bounces;
+		int totalIter = 0;
+		constexpr int MAX_ITER = 24;
 
-		if (foundTile) {
-			vf2d vIntersection;
-			vIntersection = startPosition + rayDir * distance;
-			if (lastHitX) {
-				if (vIntersection.x < pos.x)
-					hitWallNormal.x = 1.0f;
-				else
-					hitWallNormal.x = -1.0f;
+		while (totalIter < MAX_ITER) {
+			auto [found, dist, lastHitX, hitTile, hitType] = doDDA(startPosition, rayDir);
+			if (!found) break;
+
+			vf2d hitPos = startPosition + rayDir * dist;
+
+			if (hitType == HIT_RECEPTOR) {
+				receptorMap[{hitTile.x, hitTile.y}].get_mut<BeamReceptor>()->isLit = true;
+				// Draw segment ending at receptor center
+				vf2d recCenter = { hitTile.x + 0.5f, hitTile.y + 0.5f };
+				vecLines.push_back({ startPosition.x, startPosition.y, recCenter.x, recCenter.y, radius });
+				// Continue from just past the receptor's far tile boundary so doDDA
+				// doesn't re-find the same receptor on the next call
+				startPosition = { hitTile.x + 0.5f + rayDir.x * (0.5f + 1e-3f),
+				                  hitTile.y + 0.5f + rayDir.y * (0.5f + 1e-3f) };
+				++totalIter;
+				continue;
 			}
-			else {
-				if (vIntersection.y < pos.y)
-					hitWallNormal.y = 1.0f;
-				else
-					hitWallNormal.y = -1.0f;
+
+			vecLines.push_back({ startPosition.x, startPosition.y, hitPos.x, hitPos.y, radius });
+
+			vf2d newDir;
+			if (hitType == HIT_MIRROR) {
+				// Mirror reflection — free, uses correct diagonal normal
+				auto ori = mirrorMap[{hitTile.x, hitTile.y}];
+				vf2d mirNormal = (ori == MirrorBlock::Orientation::Slash)
+				    ? vf2d{ 1.f,  1.f }.norm()
+				    : vf2d{ 1.f, -1.f }.norm();
+				newDir = rayDir.reflectOn(mirNormal);
+			} else {
+				// Wall / solid block — consumes a bounce
+				m_wallHitPositions.push_back(hitPos);
+				if (wallBouncesLeft <= 0) break;
+				vf2d wallNormal = {};
+				if (lastHitX) wallNormal.x = rayDir.x > 0 ? -1.f : 1.f;
+				else          wallNormal.y = rayDir.y > 0 ? -1.f : 1.f;
+				newDir = rayDir.reflectOn(wallNormal);
+				--wallBouncesLeft;
 			}
 
-			auto radius = 1.0f * (4.0f * (1.0f + static_cast<float>(beamwidth))) / 32.0f;
-
-			vecLines.push_back({ startPosition.x, startPosition.y, vIntersection.x, vIntersection.y, radius });
+			startPosition = hitPos;
+			rayDir        = newDir;
+			++totalIter;
 		}
 
-		vf2d lastAim = aim.norm();
-
-		if (!vecLines.empty() && bounces > 0) {
-			for (int i = 0; i < bounces; i++) {
-				auto& lastEdge = vecLines.back();
-				startPosition = {
-					lastEdge.ex,
-					lastEdge.ey
-				};
-
-				vf2d newRayDir = lastAim.reflectOn(hitWallNormal);
-				hitWallNormal = { 0.0f, 0.0f };
-
-				rayDir = { newRayDir.x, newRayDir.y };
-				lastAim = rayDir.norm();
-				stepsize = {sqrt(1 + (rayDir.y / rayDir.x) * (rayDir.y / rayDir.x)),
-				 			  sqrt(1 + (rayDir.x / rayDir.y) * (rayDir.x / rayDir.y)) };
-				mapCheck = startPosition;
-				
-				if (rayDir.x < 0) {
-					step.x = -1;
-					rayLength1D.x = (startPosition.x - static_cast<float>(mapCheck.x)) * stepsize.x;
-				}
-				else {
-					step.x = 1;
-					rayLength1D.x = (static_cast<float>(mapCheck.x + 1) - startPosition.x) * stepsize.x;
-				}
-
-				if (rayDir.y < 0) {
-					step.y = -1;
-					rayLength1D.y = (startPosition.y - static_cast<float>(mapCheck.y)) * stepsize.y;
-				}
-				else {
-					step.y = 1;
-					rayLength1D.y = (static_cast<float>(mapCheck.y + 1) - startPosition.y) * stepsize.y;
-				}
-
-				foundTile = false;
-				distance = 0.0f;
-				while (!foundTile && distance < maxDistance) {
-					if (rayLength1D.x < rayLength1D.y) {
-						mapCheck.x += step.x;
-						distance = rayLength1D.x;
-						rayLength1D.x += stepsize.x;
-						lastHitX = true;
-					}
-					else {
-						mapCheck.y += step.y;
-						distance = rayLength1D.y;
-						rayLength1D.y += stepsize.y;
-						lastHitX = false;
-					}
-
-					if (mapCheck.x >= 0 && mapCheck.x < dungeon.getWidth() && mapCheck.y >= 0 && mapCheck.y < dungeon.getHeight()) {
-						if (dungeon.getTile(mapCheck.x, mapCheck.y) == Tile::WALL ||
-							dungeon.getTile(mapCheck.x, mapCheck.y) == Tile::VOID) {
-							foundTile = true;
-						}
-					}
-				}
-
-				
-				if (foundTile) {
-					vf2d vIntersection;
-					vIntersection = startPosition + rayDir * distance;
-					if (lastHitX) {
-						if (vIntersection.x < pos.x)
-							hitWallNormal.x = 1.0f;
-						else
-							hitWallNormal.x = -1.0f;
-					}
-					else {
-						if (vIntersection.y < pos.y)
-							hitWallNormal.y = 1.0f;
-						else
-							hitWallNormal.y = -1.0f;
-					}
-
-					auto radius = 1.0f * (4.0f * (1.0f + static_cast<float>(beamwidth))) / 32.0f;
-					vecLines.push_back({ startPosition.x, startPosition.y, vIntersection.x, vIntersection.y, radius });
-				}
-			}
-
-		}
-
+		LightLayer::StartLight();
 		for (auto& edge : vecLines) {
 
 			vf2d start = { edge.sx * static_cast<float>(Configuration::tileWidth), edge.sy * static_cast<float>(Configuration::tileHeight )};
@@ -266,32 +262,28 @@ void WizardClass::shoot(flecs::entity entity)
 			float startAngle = 360.0f - (vf2d(edge.sx, edge.sy).getAngle() - vf2d( edge.sx, edge.sy ).getAngle());
 			float endAngle = 360.0f - (vf2d(edge.sx, edge.sy).getAngle() - vf2d( edge.ex, edge.ey ).getAngle());
 
-
 			if (startAngle >= 0.0f && startAngle <= 180.0f) {
 				startAngle += 180.0f;
 				endAngle += 180.0f;
 			}
 
-			Color laserBeam = { 255,0,0,30 };
+			float radius = edge.radius * 16.0f;
+			Draw::ThickLine(start, end, { 255,100,100,25 }, radius * 2.0f);
 
-			float radius = edge.radius * 32.0f;
-
-			Render2D::DrawArcFilled(start, radius, startAngle, endAngle, 32, laserBeam);
-			Render2D::DrawArcFilled(end, radius, endAngle + 180.0f, startAngle + 180.0f, 32, laserBeam);
-			Render2D::DrawThickLine(start, end, laserBeam, radius * 2.0f);
-
-			radius /= 2.5f;
-
-			Render2D::DrawArcFilled(start, radius, startAngle, endAngle, 32, laserBeam);
-			Render2D::DrawArcFilled(end, radius, endAngle + 180.0f, startAngle + 180.0f, 32, laserBeam);
-			Render2D::DrawThickLine(start, end, laserBeam, radius * 2.0f);
-
-			radius /= 3.0f;
-
-			Render2D::DrawArcFilled(start, radius, startAngle, endAngle, 32, laserBeam);
-			Render2D::DrawArcFilled(end, radius, endAngle + 180.0f, startAngle + 180.0f, 32, laserBeam);
-			Render2D::DrawThickLine(start, end, { 255,100,100,25 }, radius * 2.0f);
 		}
+		LightLayer::EndLight();
+		for (int pi = 0; pi < static_cast<int>(m_wallHitPositions.size()) && pi < LASER_PARTICLE_COUNT; ++pi) {
+			Particles::SetPosition(m_laserHitParticles[pi], {
+				m_wallHitPositions[pi].x * static_cast<float>(Configuration::tileWidth),
+				m_wallHitPositions[pi].y * static_cast<float>(Configuration::tileHeight),
+				0.0f
+			});
+			Particles::Start(m_laserHitParticles[pi]);
+            Particles::QueueDraw(m_laserHitParticles[pi]);
+		}
+
+        if (m_wallHitPositions.size() > 0) {
+        }
 		if (laserLastDamageTick <= 0.0f) {
 			for (auto& edge : vecLines) {
 
@@ -303,8 +295,9 @@ void WizardClass::shoot(flecs::entity entity)
 					const float fLineX1 = edge.ex - edge.sx;
 					const float fLineY1 = edge.ey - edge.sy;
 
-					const float fLineX2 = rigidBody2d->RigidBody->GetPosition().x - edge.sx;
-					const float fLineY2 = rigidBody2d->RigidBody->GetPosition().y - edge.sy;
+					b2Vec2 enemyPos = b2Body_GetPosition(rigidBody2d->RigidBody);
+					const float fLineX2 = enemyPos.x - edge.sx;
+					const float fLineY2 = enemyPos.y - edge.sy;
 
 					const float fEdgeLength = fLineX1 * fLineX1 + fLineY1 * fLineY1;
 
@@ -313,11 +306,13 @@ void WizardClass::shoot(flecs::entity entity)
 					const float fClosestPointX = edge.sx + t * fLineX1;
 					const float fClosestPointY = edge.sy + t * fLineY1;
 
-					const float fDistance = sqrtf((rigidBody2d->RigidBody->GetPosition().x - fClosestPointX) * (rigidBody2d->RigidBody->GetPosition().x - fClosestPointX) + (rigidBody2d->RigidBody->GetPosition().y - fClosestPointY) * (rigidBody2d->RigidBody->GetPosition().y - fClosestPointY));
+					const float fDistance = sqrtf((enemyPos.x - fClosestPointX) * (enemyPos.x - fClosestPointX) + (enemyPos.y - fClosestPointY) * (enemyPos.y - fClosestPointY));
 
 					if (fDistance <= (rigidBody2d->radius + edge.radius)) {
+						if (entity.has<DamageAccumulator>()) {
+							entity.get_mut<DamageAccumulator>()->add(float(2 * (damage + 1)), {enemyPos.x * Configuration::tileWidth, enemyPos.y * Configuration::tileHeight});
+						}
 						health->currentHealth -= (2 * (damage + 1));
-
 					}
 
 				});
@@ -326,6 +321,71 @@ void WizardClass::shoot(flecs::entity entity)
 			}
 		}
 
+	}
+	break;
+	case 3:
+	{
+		if (secondsSinceLastWarp <= 0.0f) {
+			const int upgrades = player->weaponUpgrades[2];
+
+			// Slow scaling: need 9 upgrades per extra warp
+			const int   maxAmount  = 1 + upgrades / 9;
+			// Radius: grows 0.05 tiles per upgrade (need 20 upgrades to add 1 tile)
+			const float radius     = 3.0f + upgrades * 0.05f;
+			// Duration: grows 0.1s per upgrade
+			const float duration   = 4.0f + upgrades * 0.1f;
+			// Slow factor is fixed — upgrade the count/size, not the intensity
+			constexpr float slowFactor = 0.15f;
+
+			// Enforce per-player cap: remove oldest warp if at max
+			std::vector<flecs::entity> myWarps;
+			const auto existingWarps = ECS::getWorld().filter<TimeWarpData>();
+			existingWarps.each([&](flecs::entity we, TimeWarpData& wd) {
+				if (wd.ownerId == entity.id()) myWarps.push_back(we);
+			});
+
+			while (static_cast<int>(myWarps.size()) >= maxAmount) {
+				auto oldest = std::min_element(myWarps.begin(), myWarps.end(),
+					[](const flecs::entity& a, const flecs::entity& b) {
+						return a.get<TimeWarpData>()->timer < b.get<TimeWarpData>()->timer;
+					});
+				ECS::removeEntity(&(*oldest));
+				myWarps.erase(oldest);
+			}
+
+			CreateTimeWarpEntity(vf2d{pos.x - 0.5f, pos.y - 0.5f}, radius, duration, slowFactor, entity.id());
+			secondsSinceLastWarp = 5.0f;
+			player->shooting = false;
+		}
+	}
+	break;
+	case 4:
+	{
+		if (secondsSinceLastFragment <= 0.0f) {
+			const int upgrades = player->weaponUpgrades[3];
+
+			// 1 fragment base, +1 per 4 upgrade levels
+			const int maxFragments = 1 + upgrades / 4;
+
+			int currentCount = 0;
+			const auto fragCountFilter = ECS::getWorld().filter<FragmentData>();
+			fragCountFilter.each([&](flecs::entity, FragmentData& fd) {
+				if (fd.ownerId == entity.id()) currentCount++;
+			});
+
+			if (currentCount < maxFragments) {
+				float maxHp       = 2.f + upgrades / 3.f;
+				float maxLifetime = 8.f + upgrades * 0.3f;
+				int   maxChains   = 1 + upgrades / 5;
+				float chainRange  = 3.f + upgrades * 0.1f;
+				float chainDamage = 5.f + upgrades * 0.5f;
+				CreateFragmentEntity(vf2d{ pos.x - 0.5f, pos.y - 0.5f }, maxHp, maxLifetime,
+				                     maxChains, chainRange, chainDamage, entity.id());
+				secondsSinceLastFragment = 0.3f;
+			}
+
+			player->shooting = false;
+		}
 	}
 	break;
 	default:

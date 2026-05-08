@@ -340,7 +340,7 @@ public:
     {
         data.width = getWidth();
         data.height = getHeight();
-
+        data.tiles.clear();
 
         for (int y = 0; y < data.height; y++) {
             for (int x = 0; x < data.width; x++) {
@@ -490,12 +490,12 @@ public:
         
     }
 
-private:
-
     void setTile(int x, int y, Tile tile) {
         const auto index = x + y * _width;
         _tiles[static_cast<int64_t>(index)] = tile;
     }
+
+private:
 
 
 private:

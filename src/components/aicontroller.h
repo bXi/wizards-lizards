@@ -1,4 +1,5 @@
 #pragma once
+#include "configuration.h"
 
 struct AIController
 {
@@ -29,15 +30,18 @@ struct AIController
 
 	void applyForce(const vf2d& desiredVelocity)
 	{
-		const b2Vec2 currentVelocity = self.get<RigidBody2D>()->RigidBody->GetLinearVelocity();
-		const b2Vec2 steering = b2Vec2(desiredVelocity.x, desiredVelocity.y) - currentVelocity;
-		const b2Vec2 force = b2Vec2(steering.x * maxSpeed, steering.y * maxSpeed);
-		self.get<RigidBody2D>()->RigidBody->ApplyForceToCenter(force, true);
+		b2BodyId bodyId = self.get<RigidBody2D>()->RigidBody;
+		const b2Vec2 currentVelocity = b2Body_GetLinearVelocity(bodyId);
+		const b2Vec2 steering = b2Vec2{desiredVelocity.x, desiredVelocity.y} - currentVelocity;
+		const b2Vec2 force = b2Vec2{steering.x * maxSpeed, steering.y * maxSpeed};
+		b2Body_ApplyForceToCenter(bodyId, force, true);
 	}
 
 	void seek()
 	{
-		const vf2d desired = vf2d(target.get<RigidBody2D>()->RigidBody->GetPosition() - self.get<RigidBody2D>()->RigidBody->GetPosition()).norm() * maxSpeed / Configuration::slowMotionFactor;
+		b2Vec2 targetPos = b2Body_GetPosition(target.get<RigidBody2D>()->RigidBody);
+		b2Vec2 selfPos   = b2Body_GetPosition(self.get<RigidBody2D>()->RigidBody);
+		const vf2d desired = vf2d{targetPos.x - selfPos.x, targetPos.y - selfPos.y}.norm() * maxSpeed / Configuration::slowMotionFactor;
 		applyForce(desired);
 	}
 

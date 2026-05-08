@@ -16,6 +16,6 @@ struct UserDataComponent {
 
 struct RigidBody2D
 {
-	b2Body* RigidBody = nullptr;
+	b2BodyId RigidBody = b2_nullBodyId;
 	float radius;
 };

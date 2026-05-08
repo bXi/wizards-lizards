@@ -1,4 +1,5 @@
 #include "levelmanager.h"
+#include "configuration.h"
 
 
 LevelManager::LevelManager()
@@ -43,7 +44,7 @@ Dungeon LevelManager::getTestRoom()
 
 
 
-void LevelManager::renderRow(const int start, const int rows, Dungeon _dungeon, Texture _finalTextureImage, const Texture _dungeonTileset)
+void LevelManager::renderRow(const int start, const int rows, Dungeon _dungeon, TextureAsset _finalTextureImage, const TextureAsset _dungeonTileset)
 {
 
 	[[maybe_unused]] constexpr char FLOOR = ' ';
@@ -65,7 +66,7 @@ void LevelManager::renderRow(const int start, const int rows, Dungeon _dungeon, 
 		return getRectangle(tileId % 16, tileId / 16);
 	};
 
-	auto drawToMap = [&](Texture* _tex, const Texture(_tileset), const rectf tile, const rectf dest, Color color)
+	auto drawToMap = [&](TextureAsset* _tex, const TextureAsset(_tileset), const rectf tile, const rectf dest, Color color)
 	{
 		//std::lock_guard<std::mutex> guard(_tex_mutex);
 		//ImageDraw(_tex, _tileset, tile, dest, color);
@@ -124,7 +125,7 @@ void LevelManager::renderRow(const int start, const int rows, Dungeon _dungeon, 
 	}
 }
 
-Texture LevelManager::drawLevel()
+TextureAsset LevelManager::drawLevel()
 {
 //	dungeonTileset = LoadImage("assets/tilesets/dungeon.png");
 //	finalTextureImage = GenImageColor(dungeon.getWidth() * Configuration::tileWidth, dungeon.getHeight() * Configuration::tileHeight, BLACK);
@@ -148,6 +149,6 @@ Texture LevelManager::drawLevel()
 //	UnloadImage(finalTextureImage);
 //
 //	return finalTexture;
-Texture temp{};
+TextureAsset temp{};
 return temp;
 }

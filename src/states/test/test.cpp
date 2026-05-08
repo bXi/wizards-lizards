@@ -2,6 +2,9 @@
 
 #include "state/state.h"
 #include "box2dobjects.h"
+#include <queue>
+#include <unordered_set>
+#include <algorithm>
 
 #include "utils/vectors.h"
 #include "utils/colors.h"
@@ -10,16 +13,19 @@ int lastDungeonSize = 0;
 
 #include <ui/ui.h>
 
-b2Vec2 Gravity(0.0f, 98.0f);    // Y+ is down, so gravity is not negative
-b2World World(Gravity);
+b2WorldId testWorldId;
 
 void TestState::load()
 {
-    Audio::GetMusic("assets/music/menu.mp3");
+    b2WorldDef worldDef = b2DefaultWorldDef();
+    worldDef.gravity = {0.0f, 98.0f};
+    testWorldId = b2CreateWorld(&worldDef);
 
-    Audio::GetSound("assets/sfx/slowmo-enter.wav");
-    Audio::GetSound("assets/sfx/cursor.wav");
-    dungeonTileset = Textures::GetTexture("assets/tilesets/dungeon.png");
+    AssetHandler::GetMusic("assets/music/menu.mp3");
+
+    AssetHandler::GetSound("assets/sfx/slowmo-enter.wav");
+    AssetHandler::GetSound("assets/sfx/cursor.wav");
+    dungeonTileset = AssetHandler::GetTexture("assets/tilesets/dungeon.png");
 
 	//Lerp test
 	testlerp = Lerp::getLerp("Testlerp", 400.0f, 400.0f, 3.0f);
@@ -36,10 +42,6 @@ void TestState::load()
 
 
 	dg = new DungeonGen();
-
-	Objects.push_back(new BoxObject(vf2d{ 0,-50 }, vf2d{ 10,10 }, RED, 45));
-	Objects.push_back(new BoxObject(vf2d{ 20,-60 }, vf2d{ 12,8 }, GREEN, 30));
-	Objects.push_back(new BoxObject(vf2d{ -20,-60 }, vf2d{ 8,12 }, BLUE, -30));
 
 	Camera::SetTarget({((float)(Window::GetWidth() - 300) / 2.0f) + 300 , (float)(Window::GetHeight() - 20)});
     //Camera::SetScale(4.f);
@@ -72,6 +74,7 @@ void TestState::load()
 void TestState::unload()
 {
     Audio::StopMusic();
+    b2DestroyWorld(testWorldId);
 }
 
 void TestState::draw()
@@ -82,9 +85,9 @@ void TestState::draw()
 		int y = 10;
 
 		const char* backText = " ESC: back to menu";
-		maxWidth = Fonts::MeasureText("assets/fonts/APL386.ttf", 18, backText);
+		maxWidth = Text::MeasureText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), backText);
 
-		Fonts::DrawText("assets/fonts/APL386.ttf", 18, {x, Window::GetHeight() - 30.f},backText, WHITE);
+		Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {x, Window::GetHeight() - 30.f},backText, WHITE);
 
 #ifndef MSVC
 //        std::reverse(testList);
@@ -93,13 +96,13 @@ void TestState::draw()
 		for (const auto& item : testList)
 		{
 			const auto name = Helpers::TextFormat("%3u: %s", static_cast<int>(item.first) + 1, item.second.c_str());
-			Fonts::DrawText("assets/fonts/APL386.ttf", 18, {(float)x, (float)y } , name, (item.first == selected) ? YELLOW : WHITE);
-			maxWidth = std::max(maxWidth, Fonts::MeasureText("assets/fonts/APL386.ttf", 18, name));
+			Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {(float)x, (float)y } , name, (item.first == selected) ? YELLOW : WHITE);
+			maxWidth = std::max(maxWidth, Text::MeasureText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), name));
 
             y += 24;
 		}
 
-		Render2D::DrawLine({maxWidth + 40.f, 0}, {maxWidth + 40.f, (float)Window::GetHeight()}, WHITE);
+		Draw::Line({maxWidth + 40.f, 0}, {maxWidth + 40.f, (float)Window::GetHeight()}, WHITE);
 	}
 	for (const auto &key : keys)
 	{
@@ -148,7 +151,7 @@ void TestState::draw()
 			if (isCircle)
 			{
 				QuadTree::AABBCircle searchRange = { static_cast<float>(Input::GetMousePosition().x), static_cast<float>(Input::GetMousePosition().y), rectSize / 2.0f };
-				Render2D::DrawCircle({(searchRange._x), (searchRange._y)}, searchRange._r, { 255,255,255,127 });
+				Draw::Circle({(searchRange._x), (searchRange._y)}, searchRange._r, { 255,255,255,127 });
 				searchRange._x -= static_cast<float>(drawOffset.x);
 				searchRange._y -= static_cast<float>(drawOffset.y);
 				quadtree.query(searchRange, &quadtreeEntities);
@@ -157,7 +160,7 @@ void TestState::draw()
 			else
 			{
 				QuadTree::AABB searchRange = { static_cast<float>(Input::GetMousePosition().x) - rectSize / 2.0f, static_cast<float>(Input::GetMousePosition().y) - rectSize / 2.0f, rectSize, rectSize };
-				Render2D::DrawRectangle({ searchRange._left, searchRange._top}, {searchRange._width, searchRange._height }, { 255,255,255,127 });
+				Draw::Rectangle({ searchRange._left, searchRange._top}, {searchRange._width, searchRange._height }, { 255,255,255,127 });
 				searchRange._left -= static_cast<float>(drawOffset.x);
 				searchRange._top -= static_cast<float>(drawOffset.y);
 				quadtree.query(searchRange, &quadtreeEntities);
@@ -175,24 +178,24 @@ void TestState::draw()
 		}
 		quadtree.draw(drawOffset.x, drawOffset.y, WHITE);
 		quadtree.reset();
-		Fonts::DrawText("assets/fonts/APL386.ttf", 18, {(float)drawOffset.x, Window::GetHeight() - 30.f}, Helpers::TextFormat("Points: %u | Found: %u", static_cast<int>(testPoints.size()), found), WHITE);
-		Fonts::DrawText("assets/fonts/APL386.ttf", 18, {300.f, Window::GetHeight() - 30.f}, Helpers::TextFormat("%d", Window::GetFPS()), LIME);
+		Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {(float)drawOffset.x, Window::GetHeight() - 30.f}, Helpers::TextFormat("Points: %u | Found: %u", static_cast<int>(testPoints.size()), found), WHITE);
+		Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {300.f, Window::GetHeight() - 30.f}, Helpers::TextFormat("%d", Window::GetFPS()), LIME);
 
 	} break;
 	case Test::Lerp:
 	{
-		Render2D::DrawCircleFilled({testlerp->getValue(), 100.f}, 10.0f, PINK);
+		Draw::CircleFilled({testlerp->getValue(), 100.f}, 10.0f, PINK);
 
 		if (Input::KeyPressed(SDLK_SPACE))
 		{
 			testlerp->time = 0.0f;
 		}
 
-		if (Input::KeyPressed(SDLK_a))
+		if (Input::KeyPressed(SDLK_A))
 		{
 			testlerp->callback = EaseExpoInOut;
 		}
-		if (Input::KeyPressed(SDLK_s))
+		if (Input::KeyPressed(SDLK_S))
 		{
 			testlerp->callback = EaseBounceOut;
 		}
@@ -200,32 +203,32 @@ void TestState::draw()
 	} break;
 	case Test::Audio:
 	{
-		if (Input::KeyPressed(SDLK_a))
+		if (Input::KeyPressed(SDLK_A))
 		{
-            Audio::PlaySound("assets/sfx/cursor.wav");
+            Audio::PlaySound(AssetHandler::GetSound("assets/sfx/cursor.wav"));
 		}
-		if (Input::KeyPressed(SDLK_s))
+		if (Input::KeyPressed(SDLK_S))
 		{
-            Audio::PlaySound("assets/sfx/slowmo-enter.wav");
+            Audio::PlaySound(AssetHandler::GetSound("assets/sfx/slowmo-enter.wav"));
 		}
-		if (Input::KeyPressed(SDLK_d))
+		if (Input::KeyPressed(SDLK_D))
 		{
 			if (Audio::IsMusicPlaying())
 			{
                 Audio::StopMusic();
 			} else
 			{
-                Audio::PlayMusic("assets/music/menu.mp3");
+                Audio::PlayMusic(AssetHandler::GetMusic("assets/music/menu.mp3"));
 			}
 		}
 	} break;
 	case Test::Dungeon:
 	{
-		if (Input::KeyPressed(SDLK_a)) {
+		if (Input::KeyPressed(SDLK_A)) {
 			dg->generateLayout();
 		}
 
-		if (Input::KeyPressed(SDLK_s)) {
+		if (Input::KeyPressed(SDLK_S)) {
 			showLines = !showLines;
 		}
 
@@ -235,7 +238,7 @@ void TestState::draw()
 		int scalefactor = 512 / size.x;
 
 
-		if (Input::KeyPressed(SDLK_m)) {
+		if (Input::KeyPressed(SDLK_M)) {
 			auto mapString = dg->getMapString();
 
 			auto getTile = [&](int x, int y) {
@@ -260,7 +263,7 @@ void TestState::draw()
 		}
 
 
-		Render2D::DrawRectangleFilled({(float)drawOffset.x, (float)drawOffset.y}, {(float)size.x * scalefactor, (float)size.y * scalefactor}, WHITE);
+		Draw::RectangleFilled({(float)drawOffset.x, (float)drawOffset.y}, {(float)size.x * scalefactor, (float)size.y * scalefactor}, WHITE);
 
 		auto rooms = dg->getRooms();
 
@@ -270,7 +273,7 @@ void TestState::draw()
 				int xPos = drawOffset.x + (x * scalefactor);
 				int yPos = drawOffset.y + (y * scalefactor);
 
-				Render2D::DrawRectangleFilled({(float)xPos, (float)yPos}, {(float)scalefactor, (float)scalefactor}, DARKGRAY);
+				Draw::RectangleFilled({(float)xPos, (float)yPos}, {(float)scalefactor, (float)scalefactor}, DARKGRAY);
 			}
 		}
 
@@ -285,10 +288,10 @@ void TestState::draw()
 
 
 
-			Render2D::DrawRectangleFilled({(float)xPos, (float)yPos}, {(float)scalefactor * room->size.x, (float)scalefactor * room->size.y}, BLACK);
+			Draw::RectangleFilled({(float)xPos, (float)yPos}, {(float)scalefactor * room->size.x, (float)scalefactor * room->size.y}, BLACK);
 
 			if (room->northExits == 0 && room->southExits == 0 && room->eastExits == 0 && room->westExits == 0) {
-				Render2D::DrawRectangleFilled({(float)xPos, (float)yPos}, {(float)scalefactor * room->size.x, (float)scalefactor * room->size.y}, DARKRED);
+				Draw::RectangleFilled({(float)xPos, (float)yPos}, {(float)scalefactor * room->size.x, (float)scalefactor * room->size.y}, DARKRED);
 
 			}
 
@@ -300,17 +303,17 @@ void TestState::draw()
 			if (CheckCollisionPointRec(Input::GetMousePosition(), rectf(static_cast<float>(xPos), static_cast<float>(yPos), static_cast<float>(scalefactor) * room->size.x, static_cast<float>(scalefactor) * room->size.y))) {
 				color = PINK;
 
-				Fonts::DrawText("assets/fonts/APL386.ttf", 18, {1000, 100}, Helpers::TextFormat("ID: %d/%d", room->id, rooms.size()),  LIME);
-				Fonts::DrawText("assets/fonts/APL386.ttf", 18, {1000, 125}, Helpers::TextFormat("North: %d", room->northExits),  LIME);
-				Fonts::DrawText("assets/fonts/APL386.ttf", 18, {1000, 150}, Helpers::TextFormat("South: %d", room->southExits),  LIME);
-				Fonts::DrawText("assets/fonts/APL386.ttf", 18, {1000, 175}, Helpers::TextFormat("East: %d", room->eastExits),  LIME);
-				Fonts::DrawText("assets/fonts/APL386.ttf", 18, {1000, 200}, Helpers::TextFormat("West: %d", room->westExits),  LIME);
+				Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {1000, 100}, Helpers::TextFormat("ID: %d/%d", room->id, rooms.size()),  LIME);
+				Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {1000, 125}, Helpers::TextFormat("North: %d", room->northExits),  LIME);
+				Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {1000, 150}, Helpers::TextFormat("South: %d", room->southExits),  LIME);
+				Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {1000, 175}, Helpers::TextFormat("East: %d", room->eastExits),  LIME);
+				Text::DrawText(AssetHandler::GetFont("assets/fonts/APL386.ttf", 18), {1000, 200}, Helpers::TextFormat("West: %d", room->westExits),  LIME);
 			}
 
 
 
-			Render2D::DrawRectangle({(float)xPos, (float)yPos}, {(float)scalefactor * room->size.x, (float)scalefactor * room->size.y}, color);
-			Render2D::DrawRectangle({xPos + 1.f, yPos + 1.f}, {(scalefactor * room->size.x) - 2.f, (scalefactor * room->size.y) - 2.f}, color);
+			Draw::Rectangle({(float)xPos, (float)yPos}, {(float)scalefactor * room->size.x, (float)scalefactor * room->size.y}, color);
+			Draw::Rectangle({xPos + 1.f, yPos + 1.f}, {(scalefactor * room->size.x) - 2.f, (scalefactor * room->size.y) - 2.f}, color);
 
 			int doorSize = scalefactor / 4; // Adjust the size of the doorways
 			
@@ -321,7 +324,7 @@ void TestState::draw()
 
 				for (int i = 0; i < room->size.x; i++) {
 					if (room->northExits & doorBit) {
-                        Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? RED : BLACK);
+                        Draw::RectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? RED : BLACK);
 					}
 					doorX += scalefactor;
 					doorBit <<= 1;
@@ -335,7 +338,7 @@ void TestState::draw()
 
 				for (int i = 0; i < room->size.x; i++) {
 					if (room->southExits & doorBit) {
-                        Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? YELLOW : BLACK);
+                        Draw::RectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? YELLOW : BLACK);
 					}
 					doorX += scalefactor;
 					doorBit <<= 1;
@@ -349,7 +352,7 @@ void TestState::draw()
 
 				for (int i = 0; i < room->size.y; i++) {
 					if (room->eastExits & doorBit) {
-                        Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? BLUE : BLACK);
+                        Draw::RectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? BLUE : BLACK);
 					}
 					doorY += scalefactor;
 					doorBit <<= 1;
@@ -363,7 +366,7 @@ void TestState::draw()
 
 				for (int i = 0; i < room->size.y; i++) {
 					if (room->westExits & doorBit) {
-                        Render2D::DrawRectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? GREEN : BLACK);
+                        Draw::RectangleFilled({(float)doorX, (float)doorY}, {(float)doorSize, (float)doorSize}, showLines ? GREEN : BLACK);
 					}
 					doorY += scalefactor;
 					doorBit <<= 1;
@@ -380,10 +383,10 @@ void TestState::draw()
 					vf2d firstPoint = (vf2d(firstRoom->size) / 2.f + firstRoom->pos) * static_cast<float>(scalefactor);
 					vf2d secondPoint = (vf2d(secondRoom->size) / 2.f + secondRoom->pos) * static_cast<float>(scalefactor);
 
-					Render2D::DrawCircleFilled(firstPoint + drawOffset, 3, PINK);
-					Render2D::DrawCircleFilled(secondPoint + drawOffset, 3, LIME);
+					Draw::CircleFilled(firstPoint + drawOffset, 3, PINK);
+					Draw::CircleFilled(secondPoint + drawOffset, 3, LIME);
 
-					Render2D::DrawLine(firstPoint + drawOffset, secondPoint + drawOffset, YELLOW);
+					Draw::Line(firstPoint + drawOffset, secondPoint + drawOffset, YELLOW);
 
 				}
 			}
@@ -407,7 +410,7 @@ void TestState::draw()
 
 		//DrawRectangleLinesEx(drawRect, 1.0f, WHITE);
 
-        Render2D::DrawRectangle({drawRect.x, drawRect.y}, {drawRect.width, drawRect.height}, WHITE);
+        Draw::Rectangle({drawRect.x, drawRect.y}, {drawRect.width, drawRect.height}, WHITE);
 
 
 		Color lineColor = RED;
@@ -417,198 +420,376 @@ void TestState::draw()
 			lineColor = GREEN;
 		}
 
-		//Render2D::DrawLine(lineStart + drawOffset, lineEnd + drawOffset, lineColor);
+		//Draw::Line(lineStart + drawOffset, lineEnd + drawOffset, lineColor);
 
-        Render2D::DrawLine(lineStart + drawOffset, lineEnd + drawOffset, lineColor);
+        Draw::Line(lineStart + drawOffset, lineEnd + drawOffset, lineColor);
 
 	} break;
-	case Test::Box2D: {
-        //TODO: fix this
-//		cam.offset.x = ((Window::GetWidth() - (maxWidth + 40)) / 2.0f) + (maxWidth + 40);
 
-		scissorArea.x = static_cast<float>(maxWidth + 40);
-		scissorArea.width = static_cast<float>(Window::GetWidth() - (maxWidth + 40));
-	
-		scissorArea.height = static_cast<float>(Window::GetHeight());
-	
-		Render2D::BeginScissorMode({scissorArea.x, scissorArea.y, scissorArea.width, scissorArea.height});
-
-		vf2d pos = Camera::ToWorldSpace(Input::GetMousePosition());
-		if (Input::MouseButtonPressed(SDL_BUTTON_LEFT))
-		{
-
-			if (Input::KeyDown(SDLK_LSHIFT)) {
-				for (auto object : Objects) {
-					if (object->RigidBody->GetUserData().pointer) {
-
-						auto objPtr = object->RigidBody->GetUserData().pointer;
-
-						auto obj = reinterpret_cast<BallObject*>(objPtr);
-
-
-						b2Vec2 center = object->RigidBody->GetPosition();
-
-						auto mouseScreen = Camera::ToWorldSpace(Input::GetMousePosition());
-
-						b2Vec2 mouse = { (float)mouseScreen.x, (float)mouseScreen.y };
-						b2Vec2 distance = mouse - center;
-
-						if (distance.Length() < obj->Radius) {
-							obj->Radius *= 2.0f;
-
-							b2Fixture* fixtureA = obj->RigidBody->GetFixtureList();
-							obj->RigidBody->DestroyFixture(fixtureA);
-
-							b2CircleShape circleShape;
-							circleShape.m_radius = obj->Radius;
-
-							b2FixtureDef fixtureDef;
-							fixtureDef.shape = &circleShape;
-							fixtureDef.density = 1;
-							fixtureDef.friction = 0.3f;
-							obj->RigidBody->CreateFixture(&fixtureDef);
-
-
-						}
-					}
-
-				}
-			}
-			else {
-				Objects.push_back(new BallObject(pos, 3, PINK));
-
-			}
-		}
-		if (Input::MouseButtonPressed(SDL_BUTTON_RIGHT))
-		{
-			Objects.push_back(new BoxObject(pos, vf2d{ float(Helpers::GetRandomValue(10,20)),float(Helpers::GetRandomValue(10,20)) }, DARKRED, float(Helpers::GetRandomValue(0, 180))));
-		}
-
-		// update the world for the new frame
-		accumulator += Window::GetFrameTime();
-		while (accumulator >= physTime)
-		{
-			accumulator -= physTime;
-			World.Step(physTime, velocityIterations, positionIterations);
-		}
-
-
-		// set our camera 
-		//BeginMode2D(cam);
-
-		// draw a grid
-
-
-		// and some axes
-		Render2D::DrawLine({0, 0}, {100, 0}, RED);
-		Render2D::DrawLine({0, 0}, {0, -100}, BLUE);
-
-		ground.draw();
-
-		for (auto object : Objects)
-			object->draw();
-
-		//EndMode2D();
-
-		Render2D::EndScissorMode();
-
-		Fonts::DrawText("assets/fonts/APL386.ttf", 18, {maxWidth + 60.f, 10.f}, "Left Click to add a ball - Right Click to add a box",  WHITE);
-	} break;
     case Test::Render2D:{
 
-        Render2D::DrawLine({300.f, 20.f}, {350.f, 30.f}, WHITE);
-        Render2D::DrawThickLine({400.f, 20.f}, {450.f, 30.f}, WHITE, 3.f);
+        Draw::Line({300.f, 20.f}, {350.f, 30.f}, WHITE);
+        Draw::ThickLine({400.f, 20.f}, {450.f, 30.f}, WHITE, 3.f);
 
 
-        Render2D::DrawCircle({350.f, 100.f}, 40.f, WHITE);
-        Render2D::DrawCircleFilled({500.f, 100.f}, 40.f, WHITE);
+        Draw::Circle({350.f, 100.f}, 40.f, WHITE);
+        Draw::CircleFilled({500.f, 100.f}, 40.f, WHITE);
 
-        Render2D::DrawEllipse({350.f, 200.f}, 40.f, 25.f, WHITE);
-        Render2D::DrawEllipseFilled({500.f, 200.f}, 40.f, 25.f, WHITE);
+        Draw::Ellipse({350.f, 200.f}, 40.f, 25.f, WHITE);
+        Draw::EllipseFilled({500.f, 200.f}, 40.f, 25.f, WHITE);
 
         vf2d v1 = {40.f, 0.f};
         vf2d v2 = {0.f, 80.f};
         vf2d v3 = {80.f, 80.f};
-        Render2D::DrawTriangle(v1 + vf2d(300.f, 300.f), v2 + vf2d(300.f, 300.f), v3 + vf2d(300.f, 300.f), WHITE);
-        Render2D::DrawTriangleFilled(v1 + vf2d(450.5, 300.f), v2 + vf2d(450.5, 300.f), v3 + vf2d(450.5, 300.f), WHITE);
+        Draw::Triangle(v1 + vf2d(300.f, 300.f), v2 + vf2d(300.f, 300.f), v3 + vf2d(300.f, 300.f), WHITE);
+        Draw::TriangleFilled(v1 + vf2d(450.5, 300.f), v2 + vf2d(450.5, 300.f), v3 + vf2d(450.5, 300.f), WHITE);
 
-        Render2D::DrawRectangle({300.f, 400.f}, {80.f,80.f}, WHITE);
-        Render2D::DrawRectangleFilled({450.f, 400.f}, {80.f,80.f}, WHITE);
+        Draw::Rectangle({300.f, 400.f}, {80.f,80.f}, WHITE);
+        Draw::RectangleFilled({450.f, 400.f}, {80.f,80.f}, WHITE);
 
 
     } break;
-	case Test::Random:{
+	case Test::Random: {
+        auto& font18 = AssetHandler::GetFont("assets/fonts/APL386.ttf", 18);
 
-        rectf destRect = {
-                600.f,
-                200.f,
-                32.f,
-                32.f
-        };
+        if (Input::KeyPressed(SDLK_A)) {
+            auto result = GenerateMirrorPuzzle(1, 32, 1, 32);
+            if (result) {
+                puzzleViz    = *result;
+                hasVizPuzzle = true;
+                blockStats.puzzleCount++;
+                for (const auto& e : result->emitters) {
+                    if      (e.color == BeamColors::Red)   blockStats.emitRed++;
+                    else if (e.color == BeamColors::Green) blockStats.emitGreen++;
+                    else if (e.color == BeamColors::Blue)  blockStats.emitBlue++;
+                    else                                   blockStats.emitWhite++;
+                }
+                for (const auto& m : result->mirrors) {
+                    bool slash = (m.ori == MirrorBlock::Orientation::Slash);
+                    if      (m.rail == MirrorBlock::Rail::Horizontal) { if (slash) blockStats.mirSlashH++; else blockStats.mirBsH++; }
+                    else if (m.rail == MirrorBlock::Rail::Vertical)   { if (slash) blockStats.mirSlashV++; else blockStats.mirBsV++; }
+                    else                                               { if (slash) blockStats.mirSlashNone++; else blockStats.mirBsNone++; }
+                }
+                blockStats.splitters    += (int)result->splitters.size();
+                blockStats.combiners    += (int)result->combiners.size();
+                for (const auto& r : result->receptors) {
+                    switch (r.requiredColor) {
+                        case BeamColors::Red:     blockStats.recRed++;     break;
+                        case BeamColors::Green:   blockStats.recGreen++;   break;
+                        case BeamColors::Blue:    blockStats.recBlue++;    break;
+                        case BeamColors::Yellow:  blockStats.recYellow++;  break;
+                        case BeamColors::Magenta: blockStats.recMagenta++; break;
+                        case BeamColors::Cyan:    blockStats.recCyan++;    break;
+                        default:                  blockStats.recWhite++;   break;
+                    }
+                }
+                blockStats.barrierTiles += (int)result->barrierTiles.size();
+            }
+        }
+        if (Input::KeyPressed(SDLK_S) && hasVizPuzzle)
+            showVizSolution = !showVizSolution;
 
-        rectf srcRect = {
-                64.f,
-                32.f,
-                32.f,
-                32.f
-        };
+        Text::DrawText(font18, {310.f, 10.f}, "A: new puzzle", WHITE);
+        Text::DrawText(font18, {310.f, 30.f}, "S: toggle solution / scrambled", WHITE);
 
-
-
-        Render2D::DrawTexturePart(dungeonTileset, {destRect.x, destRect.y}, {destRect.width,destRect.height}, srcRect, WHITE);
-
-
-        if (Input::KeyDown(SDLK_a)) {
-            testPercentage -= 0.0001f;
+        if (!hasVizPuzzle) {
+            Text::DrawText(font18, {310.f, 60.f}, "Press A to generate a puzzle.", DARKGRAY);
+            break;
         }
 
-        if (Input::KeyDown(SDLK_d)) {
-            testPercentage += 0.0001f;
+        Text::DrawText(font18, {310.f, 60.f},
+            showVizSolution ? "VIEW: Solution" : "VIEW: Scrambled", LIME);
+
+        const vf2d off = { 400.f, 200.f };
+        const float ts  = 12.f;
+        const int   RSZ = 34;
+
+        auto T = [&](float tx, float ty) -> vf2d {
+            return { off.x + tx * ts, off.y + ty * ts };
+        };
+
+        const auto& pz = puzzleViz;
+
+        Draw::RectangleFilled(T(0, 0), { RSZ * ts, RSZ * ts }, { 18, 18, 18, 255 });
+        Draw::RectangleFilled(
+            T((float)pz.px0, (float)pz.py0),
+            { (pz.px1 - pz.px0 + 1) * ts, (pz.py1 - pz.py0 + 1) * ts },
+            { 38, 38, 38, 255 });
+
+        for (const auto& bt : pz.barrierTiles) {
+            vf2d bpos = T((float)bt.first, (float)bt.second);
+            Draw::RectangleFilled(bpos, { ts, ts }, { 80, 80, 80, 255 });
+            Draw::Rectangle(bpos, { ts, ts }, { 160, 160, 160, 200 });
         }
 
-        testPercentage = std::clamp(testPercentage, 0.f, 1.f);
+        // Receptors — tinted by required color
+        for (const auto& r : pz.receptors) {
+            Color rc = beamToColor(r.requiredColor);
+            Draw::CircleFilled(T(r.pos.x + 0.5f, r.pos.y + 0.5f), ts * 0.38f, rc);
+            Draw::Circle(T(r.pos.x + 0.5f, r.pos.y + 0.5f), ts * 0.38f, WHITE);
+        }
 
-        UI::drawSmallBar({18.75f,9.375f}, {1 ,0}, 50, 10, {0,0,255,255}, testPercentage);
+        // Helper: draw mirror or splitter diagonal
+        auto drawDiag = [&](vf2d tl, bool slash, Color mc, bool halfMirror) {
+            Draw::RectangleFilled(tl, { ts, ts }, { mc.r, mc.g, mc.b, halfMirror ? 45u : 60u });
+            if (slash)
+                Draw::ThickLine({ tl.x + ts, tl.y }, { tl.x, tl.y + ts }, mc, 2.f);
+            else
+                Draw::ThickLine(tl, { tl.x + ts, tl.y + ts }, mc, 2.f);
+            // Extra tick to distinguish splitter from mirror
+            if (halfMirror) {
+                vf2d cx = { tl.x + ts * 0.5f, tl.y + ts * 0.5f };
+                Draw::CircleFilled(cx, ts * 0.12f, mc);
+            }
+        };
 
-        Fonts::DrawText("assets/fonts/APL386.ttf", 20, {600.f, 250.f}, Helpers::TextFormat("%f", testPercentage), WHITE);
-
-
-
-
-
-        if (Input::KeyPressed(SDLK_s)) {
-
-            Font font = Fonts::GetFont("assets/fonts/Rosarivo-Regular.ttf", 144);
-
-            std::vector<std::string> characters;
-
-            for (char c = 'A'; c <= 'Z'; ++c) { characters.push_back(std::string(1, c)); }
-            for (char c = 'a'; c <= 'z'; ++c) { characters.push_back(std::string(1, c)); }
-            for (char c = '0'; c <= '9'; ++c) { characters.push_back(std::string(1, c)); }
-
-            int c = 0;
-            for (auto ch : characters) {
-
-                std::string temp = std::to_string(c);
-
-                SDL_Surface *textSurface = TTF_RenderUTF8_Blended(font.font, ch.c_str(), WHITE);
-
-                Texture t;
-
-                t.surface = textSurface;
-                t.width = textSurface->w;
-                t.height = textSurface->h;
-
-                temp += ch + ".png";
-
-                Textures::SaveTextureAsPNG(t, temp.c_str());
-
-                SDL_DestroySurface(textSurface);
-                c++;
+        // Mirrors — with rail indicator
+        const auto& activeMirrors = showVizSolution ? pz.solutionMirrors : pz.mirrors;
+        for (const auto& m : activeMirrors) {
+            vf2d tl = T((float)m.pos.x, (float)m.pos.y);
+            bool slash = (m.ori == MirrorBlock::Orientation::Slash);
+            Color mc   = slash ? Color{80, 160, 255, 255} : Color{255, 160, 60, 255};
+            drawDiag(tl, slash, mc, false);
+            // Rail: bounded track rectangle [railMin, railMax] + tick mark on mirror
+            if (m.rail == MirrorBlock::Rail::Vertical && m.railMin < m.railMax) {
+                vf2d rTL = T((float)m.pos.x, (float)m.railMin);
+                vf2d rSZ = { ts, (m.railMax - m.railMin + 1) * ts };
+                Draw::RectangleFilled(rTL, rSZ, { mc.r, mc.g, mc.b, 18 });
+                Draw::Rectangle(rTL, rSZ, { mc.r, mc.g, mc.b, 80 });
+                Draw::ThickLine(tl + vf2d{ts*0.5f, 0.f}, tl + vf2d{ts*0.5f, ts}, mc, 2.f);
+            } else if (m.rail == MirrorBlock::Rail::Horizontal && m.railMin < m.railMax) {
+                vf2d rTL = T((float)m.railMin, (float)m.pos.y);
+                vf2d rSZ = { (m.railMax - m.railMin + 1) * ts, ts };
+                Draw::RectangleFilled(rTL, rSZ, { mc.r, mc.g, mc.b, 18 });
+                Draw::Rectangle(rTL, rSZ, { mc.r, mc.g, mc.b, 80 });
+                Draw::ThickLine(tl + vf2d{0.f, ts*0.5f}, tl + vf2d{ts, ts*0.5f}, mc, 2.f);
             }
         }
 
+        // Splitters — triangular prism: tip = facing direction, R/G/B colored edges
+        const auto& activeSplitters = showVizSolution ? pz.solutionSplitters : pz.splitters;
+        for (const auto& s : activeSplitters) {
+            vf2d tl   = T((float)s.pos.x, (float)s.pos.y);
+            // Rail track
+            Color sc = { 200, 180, 60, 255 };
+            if (s.rail == MirrorBlock::Rail::Vertical && s.railMin < s.railMax) {
+                vf2d rTL = T((float)s.pos.x, (float)s.railMin);
+                vf2d rSZ = { ts, (s.railMax - s.railMin + 1) * ts };
+                Draw::RectangleFilled(rTL, rSZ, { sc.r, sc.g, sc.b, 18 });
+                Draw::Rectangle(rTL, rSZ, { sc.r, sc.g, sc.b, 80 });
+            } else if (s.rail == MirrorBlock::Rail::Horizontal && s.railMin < s.railMax) {
+                vf2d rTL = T((float)s.railMin, (float)s.pos.y);
+                vf2d rSZ = { (s.railMax - s.railMin + 1) * ts, ts };
+                Draw::RectangleFilled(rTL, rSZ, { sc.r, sc.g, sc.b, 18 });
+                Draw::Rectangle(rTL, rSZ, { sc.r, sc.g, sc.b, 80 });
+            }
+            float half = ts * 0.5f;
+            vf2d  c    = tl + vf2d{ half, half };
+            vf2d  fd   = { (float)s.facing.x, (float)s.facing.y };
+            vf2d  lp   = { fd.y, -fd.x };  // leftOf(facing)
+            vf2d  rp   = { -fd.y, fd.x };  // rightOf(facing)
+            vf2d  tip  = c + fd * half;
+            vf2d  b1   = c + lp * half - fd * half; // top-left of base side
+            vf2d  b2   = c + rp * half - fd * half; // bottom-right of base side
+            // Fill background
+            Draw::RectangleFilled(tl, { ts, ts }, { 30, 30, 30, 200 });
+            // Colored edges: Red = b1→tip, Green = b2→tip, Blue = base b1→b2 (input face)
+            Draw::ThickLine(b1,  tip, { 255,  60,  60, 255 }, 2.f); // Red
+            Draw::ThickLine(b2,  tip, {  60, 210,  60, 255 }, 2.f); // Green
+            Draw::ThickLine(b1,  b2,  {  80, 140, 255, 255 }, 2.f); // Blue input base
+            Draw::CircleFilled(tip, ts * 0.1f, { 255, 255, 255, 255 });
+        }
 
+        // Combiners — X shape
+        const auto& activeCombiners = showVizSolution ? pz.solutionCombiners : pz.combiners;
+        for (const auto& c : activeCombiners) {
+            vf2d tl = T((float)c.pos.x, (float)c.pos.y);
+            Color cc = { 60, 220, 200, 255 };
+            // Rail track
+            if (c.rail == MirrorBlock::Rail::Vertical && c.railMin < c.railMax) {
+                vf2d rTL = T((float)c.pos.x, (float)c.railMin);
+                vf2d rSZ = { ts, (c.railMax - c.railMin + 1) * ts };
+                Draw::RectangleFilled(rTL, rSZ, { cc.r, cc.g, cc.b, 18 });
+                Draw::Rectangle(rTL, rSZ, { cc.r, cc.g, cc.b, 80 });
+            } else if (c.rail == MirrorBlock::Rail::Horizontal && c.railMin < c.railMax) {
+                vf2d rTL = T((float)c.railMin, (float)c.pos.y);
+                vf2d rSZ = { (c.railMax - c.railMin + 1) * ts, ts };
+                Draw::RectangleFilled(rTL, rSZ, { cc.r, cc.g, cc.b, 18 });
+                Draw::Rectangle(rTL, rSZ, { cc.r, cc.g, cc.b, 80 });
+            }
+            Draw::RectangleFilled(tl, { ts, ts }, { cc.r, cc.g, cc.b, 50 });
+            Draw::ThickLine(tl,                       tl + vf2d{ts, ts}, cc, 2.f);
+            Draw::ThickLine(tl + vf2d{ts, 0}, tl + vf2d{0, ts}, cc, 2.f);
+            // Arrow showing output direction
+            vf2d cx = tl + vf2d{ts * 0.5f, ts * 0.5f};
+            vf2d tip = cx + vf2d{c.outputDir.x * ts * 0.6f, c.outputDir.y * ts * 0.6f};
+            Draw::ThickLine(cx, tip, cc, 2.f);
+        }
+
+        // Emitters — filled rect tinted by beam color + direction arrow
+        for (const auto& e : pz.emitters) {
+            Color ec = beamToColor(e.color);
+            vf2d etl = T((float)e.tilePos.x, (float)e.tilePos.y);
+            Draw::RectangleFilled(etl, { ts, ts }, { ec.r, ec.g, ec.b, 200 });
+            Draw::Rectangle(etl, { ts, ts }, WHITE);
+            // Arrow pointing in firing direction
+            vf2d ecenter = etl + vf2d{ ts * 0.5f, ts * 0.5f };
+            vf2d fd = { (float)e.direction.x, (float)e.direction.y };
+            vf2d tip  = ecenter + fd * (ts * 0.45f);
+            vf2d base = ecenter - fd * (ts * 0.15f);
+            vf2d perp = { -fd.y, fd.x };
+            Draw::TriangleFilled(tip,
+                base + perp * (ts * 0.2f),
+                base - perp * (ts * 0.2f),
+                WHITE);
+        }
+        Draw::Rectangle(T(0, 0), { RSZ * ts, RSZ * ts }, WHITE);
+
+        // Beam trace (solution view — standalone, no ECS)
+        if (showVizSolution) {
+            std::unordered_map<int64_t, MirrorBlock::Orientation> mirrorMap;
+            std::unordered_map<int64_t, vi2d>                     splMap;
+            std::unordered_map<int64_t, vi2d>                     comMap;
+            std::unordered_set<int64_t>                           recSet;
+
+            for (const auto& m : pz.solutionMirrors)   mirrorMap[tileKey(m.pos.x, m.pos.y)] = m.ori;
+            for (const auto& s : pz.solutionSplitters)  splMap[tileKey(s.pos.x, s.pos.y)]   = s.facing;
+            for (const auto& c : pz.solutionCombiners)  comMap[tileKey(c.pos.x, c.pos.y)]   = c.outputDir;
+            for (const auto& r : pz.receptors)          recSet.insert(tileKey(r.pos.x, r.pos.y));
+
+            struct ActiveBeam { vi2d pos; vi2d dir; BeamColor color; vf2d segStart; };
+            std::queue<ActiveBeam> work;
+            for (const auto& e : pz.emitters)
+                work.push({ e.tilePos, e.direction, e.color,
+                    T(e.tilePos.x + 0.5f + e.direction.x * 0.5f,
+                      e.tilePos.y + 0.5f + e.direction.y * 0.5f) });
+
+            std::unordered_map<int64_t, BeamColor> combinerAccum;
+            std::unordered_set<uint64_t> visited;
+            auto visitKey = [](int x, int y, int dx, int dy, BeamColor c) -> uint64_t {
+                return ((uint64_t)(uint16_t)x)
+                     | ((uint64_t)(uint16_t)y << 16)
+                     | ((uint64_t)(uint8_t)(dx + 1) << 32)
+                     | ((uint64_t)(uint8_t)(dy + 1) << 34)
+                     | ((uint64_t)c << 36);
+            };
+
+            while (!work.empty()) {
+                auto [pos, dir, color, segStart] = work.front();
+                work.pop();
+
+                for (int step = 0; step < 200; ++step) {
+                    pos.x += dir.x; pos.y += dir.y;
+
+                    uint64_t vk = visitKey(pos.x, pos.y, dir.x, dir.y, color);
+                    if (visited.count(vk)) break;
+                    visited.insert(vk);
+
+                    const bool isWall = std::find(pz.barrierTiles.begin(), pz.barrierTiles.end(), std::make_pair(pos.x, pos.y)) != pz.barrierTiles.end()
+                        || pos.x < pz.rx0 || pos.x > pz.rx1
+                        || pos.y < pz.ry0 || pos.y > pz.ry1;
+
+                    Color bc = beamToColor(color);
+                    vf2d  center = T(pos.x + 0.5f, pos.y + 0.5f);
+
+                    if (isWall) {
+                        Draw::ThickLine(segStart, T(pos.x + 0.5f - dir.x * 0.5f, pos.y + 0.5f - dir.y * 0.5f), bc, 2.f);
+                        break;
+                    }
+                    if (recSet.count(tileKey(pos.x, pos.y))) {
+                        Draw::ThickLine(segStart, center, bc, 2.f);
+                        segStart = center; continue; // beam passes through receptor
+                    }
+                    auto mirIt = mirrorMap.find(tileKey(pos.x, pos.y));
+                    if (mirIt != mirrorMap.end()) {
+                        Draw::ThickLine(segStart, center, bc, 2.f);
+                        dir = reflectBeam(dir, mirIt->second);
+                        segStart = center; continue;
+                    }
+                    // Prism splitter: beam traveling in facing direction entered through base → split.
+                    // Any other direction passes through.
+                    auto splIt = splMap.find(tileKey(pos.x, pos.y));
+                    if (splIt != splMap.end()) {
+                        Draw::ThickLine(segStart, center, bc, 2.f);
+                        const vi2d& facing = splIt->second;
+                        if (dir.x == facing.x && dir.y == facing.y) {
+                            if (color & BeamColors::Blue)
+                                work.push({ pos, facing,          BeamColors::Blue,  center });
+                            if (color & BeamColors::Red)
+                                work.push({ pos, leftOf(facing),  BeamColors::Red,   center });
+                            if (color & BeamColors::Green)
+                                work.push({ pos, rightOf(facing), BeamColors::Green, center });
+                            break;
+                        } else {
+                            segStart = center; continue;
+                        }
+                    }
+                    auto comIt = comMap.find(tileKey(pos.x, pos.y));
+                    if (comIt != comMap.end()) {
+                        Draw::ThickLine(segStart, center, bc, 2.f);
+                        BeamColor& accum = combinerAccum[tileKey(pos.x, pos.y)];
+                        BeamColor newAccum = accum | color;
+                        if (newAccum != accum) { accum = newAccum; work.push({ pos, comIt->second, accum, center }); }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Legend
+        Text::DrawText(font18, {310.f, 85.f},  "/ \\ = mirror (blue=slash, orange=backslash)", { 80, 160, 255, 255 });
+        Text::DrawText(font18, {310.f, 105.f}, "triangle = prism splitter (R/G/B faces)",       { 255,  60,  60, 255 });
+        Text::DrawText(font18, {310.f, 125.f}, "X = combiner",                                  { 60, 220, 200, 255 });
+        Text::DrawText(font18, {310.f, 145.f}, "| = vertical rail  -- = horizontal rail",       { 180, 180, 180, 255 });
+
+        // Block stats panel — bottom-right corner
+        if (blockStats.puzzleCount > 0) {
+            struct Row { const char* label; int count; Color col; };
+            const Color cMirB  = {  80, 160, 255, 255 };
+            const Color cMirO  = { 255, 160,  60, 255 };
+            const Color cSpl   = { 255,  60,  60, 255 };
+            const Color cCom   = {  60, 220, 200, 255 };
+            const Row rows[] = {
+                { "Emit Red",         blockStats.emitRed,      { 255,  80,  80, 255 } },
+                { "Emit Green",       blockStats.emitGreen,    {  80, 210,  80, 255 } },
+                { "Emit Blue",        blockStats.emitBlue,     {  80, 140, 255, 255 } },
+                { "Emit White",       blockStats.emitWhite,    { 255, 240, 200, 255 } },
+                { "Mirror /",         blockStats.mirSlashNone, cMirB },
+                { "Mirror \\",        blockStats.mirBsNone,    cMirO },
+                { "Mirror / H-rail",  blockStats.mirSlashH,    cMirB },
+                { "Mirror \\ H-rail", blockStats.mirBsH,       cMirO },
+                { "Mirror / V-rail",  blockStats.mirSlashV,    cMirB },
+                { "Mirror \\ V-rail", blockStats.mirBsV,       cMirO },
+                { "Splitter",         blockStats.splitters,    cSpl  },
+                { "Combiner",         blockStats.combiners,    cCom  },
+                { "Recep Red",        blockStats.recRed,       { 255,  80,  80, 255 } },
+                { "Recep Green",      blockStats.recGreen,     {  80, 210,  80, 255 } },
+                { "Recep Blue",       blockStats.recBlue,      {  80, 140, 255, 255 } },
+                { "Recep Yellow",     blockStats.recYellow,    { 255, 220,  40, 255 } },
+                { "Recep Magenta",    blockStats.recMagenta,   { 220,  60, 220, 255 } },
+                { "Recep Cyan",       blockStats.recCyan,      {  60, 210, 210, 255 } },
+                { "Recep White",      blockStats.recWhite,     { 255, 240, 200, 255 } },
+                { "Barrier tiles",    blockStats.barrierTiles, { 160, 160, 160, 255 } },
+            };
+            constexpr int   N      = sizeof(rows) / sizeof(rows[0]);
+            constexpr float lineH  = 13.f;
+            const float     panelH = lineH * (N + 1) + 8.f;
+            const float     panelW = 180.f;
+            const float     px     = (float)Window::GetWidth()  - panelW - 10.f;
+            const float     py     = (float)Window::GetHeight() - panelH - 10.f;
+
+            Draw::RectangleFilled({ px - 4.f, py - 4.f }, { panelW + 8.f, panelH + 8.f }, { 0, 0, 0, 170 });
+            Draw::Rectangle     ({ px - 4.f, py - 4.f }, { panelW + 8.f, panelH + 8.f }, { 80, 80, 80, 200 });
+
+            Text::DrawText(font18, { px, py },
+                Helpers::TextFormat("Puzzles: %d", blockStats.puzzleCount), { 200, 200, 200, 255 }, 11.f);
+
+            for (int i = 0; i < N; ++i) {
+                float ry = py + lineH * (i + 1) + 4.f;
+                Text::DrawText(font18, { px, ry },
+                    Helpers::TextFormat("%-18s %d", rows[i].label, rows[i].count), rows[i].col, 10.f);
+            }
+        }
 
     } break;
     case Test::J9X_Geom: {
@@ -723,7 +904,7 @@ void TestState::draw()
 
 		// Draw Intersections
 		for (const auto& intersection : vIntersections)
-			Render2D::DrawCircleFilled({intersection.x, intersection.y}, 3.f, RED);
+			Draw::CircleFilled({intersection.x, intersection.y}, 3.f, RED);
 
 		if (bRayMode)
 		{
@@ -768,7 +949,7 @@ void TestState::draw()
 
 			if (closest_hit_index != -1)
 			{
-				Render2D::DrawLine({ray_laser.origin.x, ray_laser.origin.y} , {ray_reflected.origin.x, ray_reflected.origin.y} , Color(rand() % 155 + 100, 0, 0, 255));
+				Draw::Line({ray_laser.origin.x, ray_laser.origin.y} , {ray_reflected.origin.x, ray_reflected.origin.y} , Color(rand() % 155 + 100, 0, 0, 255));
 				ray_laser = ray_reflected;
 				ray_stop = false;
 				last_hit_index = closest_hit_index;
@@ -780,7 +961,7 @@ void TestState::draw()
 				// Ray didnt hit anything
 				nBounces = 0;
                 auto target = ray_laser.origin + ray_laser.direction * 1000.0f;
-				Render2D::DrawLine({ray_laser.origin.x, ray_laser.origin.y}, {target.x, target.y}, Color(rand() % 155 + 100, 0, 0, 255));
+				Draw::Line({ray_laser.origin.x, ray_laser.origin.y}, {target.x, target.y}, Color(rand() % 155 + 100, 0, 0, 255));
 			}
 		}
 

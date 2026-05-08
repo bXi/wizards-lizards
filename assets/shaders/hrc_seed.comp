@@ -1,0 +1,62 @@
+#version 450
+
+// HRC Phase A: Ray Seed — samples world texture at each probe position.
+// Computes radiance + transmittance using Beer-Lambert: T = (1-opacity)^spacing.
+// bounceTex (probe-resolution rgba16f) adds diffuse re-emission from the
+// previous frame's fluence, enabling multi-bounce GI when bounces are enabled.
+// Output: packed F16 vec4(rad.rgb, trans) as uvec2 per probe/slice.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// set=0: read resources → Compute::BindReadTexture(0, ...) and (1, ...)
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D worldTex;
+layout(set = 0, binding = 1, rgba16f) uniform readonly image2D bounceTex;
+
+// set=1 rw storage buffer → Compute::BindReadWriteBuffer(0, ...)
+layout(set = 1, binding = 0) buffer RayOut { uvec2 data[]; } rayOut;
+
+// set=2 uniform → Compute::PushUniform(0, ...)
+// vec4s placed first to avoid std140 alignment padding issues.
+layout(set = 2, binding = 0) uniform SeedUniforms {
+    vec4  transformX;    // worldX = dot(transformX.xyz, vec3(probeIdx+.5, sliceIdx+.5, 1))
+    vec4  transformY;    // worldY = dot(transformY.xyz, ...)
+    uint  probeCount;
+    uint  sliceCount;
+    float screenW;
+    float screenH;
+    float probeSpacing;
+    float pad0;
+    float pad1;
+    float pad2;
+};
+
+uvec2 packF16(vec4 v) {
+    return uvec2(packHalf2x16(v.xy), packHalf2x16(v.zw));
+}
+
+void main() {
+    int probeIdx = int(gl_GlobalInvocationID.x);
+    int sliceIdx = int(gl_GlobalInvocationID.y);
+    if (probeIdx >= int(probeCount) || sliceIdx >= int(sliceCount)) return;
+
+    vec3 p  = vec3(float(probeIdx) + 0.5, float(sliceIdx) + 0.5, 1.0);
+    vec2 wp = vec2(dot(transformX.xyz, p), dot(transformY.xyz, p));
+
+    ivec2 px = ivec2(int(floor(wp.x)), int(floor(wp.y)));
+    vec3  rad   = vec3(0.0);
+    float trans = 1.0;
+    if (px.x >= 0 && px.y >= 0 && px.x < int(screenW) && px.y < int(screenH)) {
+        vec4 scene = imageLoad(worldTex, px);
+        trans = pow(max(0.0, 1.0 - scene.a), probeSpacing);
+
+        // Bounce emission: map world position → bounce texture probe coordinates.
+        ivec2 bdim = imageSize(bounceTex);
+        ivec2 bp   = clamp(ivec2(wp / vec2(screenW, screenH) * vec2(bdim)),
+                           ivec2(0), bdim - ivec2(1));
+        vec3 bounce = imageLoad(bounceTex, bp).rgb;
+
+        rad = (scene.rgb + bounce) * (1.0 - trans);
+    }
+
+    rayOut.data[sliceIdx * int(probeCount) + probeIdx] = packF16(vec4(rad, trans));
+}

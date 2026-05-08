@@ -11,7 +11,7 @@ public:
 
     ObjectType type = ObjectType::UNDEFINED;
 
-    b2Body* RigidBody = nullptr;
+    b2BodyId RigidBody = b2_nullBodyId;
     virtual void draw() = 0;
 
     virtual ~PhysicsObject() = default;

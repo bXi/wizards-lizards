@@ -1,5 +1,6 @@
 #pragma once
 #include <utils/lerp.h>
+#include "configuration.h"
 #include "input/inputhandler.h"
 
 #include "utils/vectors.h"
@@ -18,6 +19,7 @@ struct PlayerInput
 	int selectedWeapon = 1;
 	bool shooting = false;
 	bool isRunning = false;
+	bool upgradeLock = false;
 
 	int weaponUpgrades[4] = { 0,0,0,0 };
 
@@ -61,7 +63,7 @@ struct PlayerInput
 		{
 			if (controller->is(Buttons::RUN, Action::HELD)) isRunning = true;
 
-			if (controller->is(Buttons::SWITCH_NEXT, Action::PRESSED)) {
+			if (!upgradeLock && controller->is(Buttons::SWITCH_NEXT, Action::PRESSED)) {
                 selectedWeapon++;
                 weaponSelectLerp->time = 0.0f;
                 weaponSelectLerp->started = true;
@@ -70,7 +72,7 @@ struct PlayerInput
                 weaponSelectVisibleLerp->started = false;
 
             }
-			if (controller->is(Buttons::SWITCH_PREV, Action::PRESSED)) {
+			if (!upgradeLock && controller->is(Buttons::SWITCH_PREV, Action::PRESSED)) {
                 selectedWeapon--;
                 weaponSelectLerp->time = 0.0f;
                 weaponSelectLerp->started = true;
@@ -122,9 +124,7 @@ struct PlayerInput
 		shooting = false;
 		auto* rigidBody2d = entity.get<RigidBody2D>();
 
-
-
-		for (const auto& controller : controllers)
+for (const auto& controller : controllers)
 		{
 			switch (controller->getType())
 			{
@@ -132,9 +132,10 @@ struct PlayerInput
 
 				if (controller->is(Buttons::SHOOT, Action::HELD)) {
 					const vf2d mouseScreenPos = Input::GetMousePosition();
-					const vf2d playerScreenPos = Camera::ToScreenSpace({
-						rigidBody2d->RigidBody->GetPosition().x * static_cast<float>(Configuration::tileWidth),
-						rigidBody2d->RigidBody->GetPosition().y * static_cast<float>(Configuration::tileHeight)
+					b2Vec2 rb2pos = b2Body_GetPosition(rigidBody2d->RigidBody);
+				const vf2d playerScreenPos = Camera::ToScreenSpace({
+						rb2pos.x * static_cast<float>(Configuration::tileWidth),
+						rb2pos.y * static_cast<float>(Configuration::tileHeight)
 						});
 					aim = {
 						playerScreenPos.x - (mouseScreenPos.x + static_cast<float>(Configuration::tileWidth) * 0.5f),

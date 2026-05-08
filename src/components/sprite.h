@@ -1,6 +1,6 @@
 #pragma once
 
-#include "texture/texturehandler.h"
+#include "luminoveau.h"
 
 enum class direction
 {
@@ -17,7 +17,7 @@ struct Sprite
 
 
 
-	Texture sprite;
+	TextureAsset sprite;
 
 	bool multiSheet = false;
 

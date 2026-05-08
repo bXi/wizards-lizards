@@ -12,5 +12,5 @@
 #include "components/renderframe.h"
 
 
-void CreatePlayerEntity(int index, vf2d pos);
+void CreatePlayerEntity(int index, vf2d pos, PlayerClassType classType = PlayerClassType::WIZARD);
 

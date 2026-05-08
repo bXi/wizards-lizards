@@ -5,15 +5,16 @@
 
 #include "entities/classes/baseclass.h"
 #include "entities/classes/wizard.h"
+#include "entities/classes/berserker.h"
 #include "world/world.h"
 
 
 enum class PlayerClassType
 {
 	WIZARD,
-	BERSERKER,
-	BOUNCER,
-	TRAPPER
+	WRONG_WIZARD,
+	PINBALL_WIZARD,
+	FROST_WIZARD
 
 };
 
@@ -31,10 +32,10 @@ struct PlayerClass
 
 		switch (classtype)
 		{
-		case  PlayerClassType::WIZARD: selectedClass = new WizardClass(); break;
-		case  PlayerClassType::BERSERKER: break;
-		case  PlayerClassType::BOUNCER: break;
-		case  PlayerClassType::TRAPPER: break;
+		case  PlayerClassType::WIZARD:        selectedClass = new WizardClass(); break;
+		case  PlayerClassType::WRONG_WIZARD:  selectedClass = new BerserkerClass(); break;
+		case  PlayerClassType::PINBALL_WIZARD: break;
+		case  PlayerClassType::FROST_WIZARD:  break;
 		}
 	}
 
@@ -75,22 +76,22 @@ struct PlayerClass
 		float radius = 5.f;
 		float forceMagnitude = 4500.f;
 
-		vf2d pos = rigidBody2d->RigidBody->GetPosition();
+		b2Vec2 b2pos = b2Body_GetPosition(rigidBody2d->RigidBody);
+		vf2d pos = {b2pos.x, b2pos.y};
 
 		const auto enemyFilter = ECS::getWorld().filter<EnemyEntity>();
 		enemyFilter.each([&](flecs::entity enemy, EnemyEntity renderer) {
 			auto* enemyRigidBody2d = enemy.get<RigidBody2D>();
 
-			vf2d monsterPosition = enemyRigidBody2d->RigidBody->GetPosition();  // Assuming the monster has a rigid body
+			b2Vec2 mp = b2Body_GetPosition(enemyRigidBody2d->RigidBody);
+			vf2d monsterPosition = {mp.x, mp.y};
 
 			float distance = (pos - monsterPosition).mag();
 			if (distance <= radius) {
-				// Calculate the force vector pointing away from the player
 				vf2d forceDirection = (monsterPosition - pos).norm();
 				vf2d force = forceDirection * forceMagnitude;
 
-				// Apply the force to the monster's body
-				enemyRigidBody2d->RigidBody->ApplyForceToCenter(force, true);  // Assuming Box2D is used for physics simulation
+				b2Body_ApplyForceToCenter(enemyRigidBody2d->RigidBody, {force.x, force.y}, true);
 			}
 
 		});

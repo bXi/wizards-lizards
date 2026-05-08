@@ -6,11 +6,9 @@ void CreateGateEntity(vf2d pos, int roomId) {
 
 	const auto& ecs = ECS::getWorld();
 
-	Texture sprite = Textures::GetTexture("assets/tilesets/dungeongate.png");
+	Texture sprite = AssetHandler::GetTexture("assets/tilesets/dungeongate.png");
 
 	flecs::entity entity;
-	// Create the player entity
-
 
 	entity = ecs.entity()
         .set<DeleteBulletsOnHit>({})
@@ -20,33 +18,16 @@ void CreateGateEntity(vf2d pos, int roomId) {
         .emplace<Collision>(CATEGORY_FIREBALL, (uint16_t)0x0000)
         .emplace<Sprite>(32.f, 64.f, sprite, true, true, 32, 32, 16.f, 48.f, direction::EAST);
 
-    vf2d Size = { 1,1 };
-
-	b2Body* RigidBody = nullptr;
-
-
 	auto userData = std::make_unique<UserData>();
 	userData->entity_id = entity.id();
 
-    b2BodyDef bodyDef;
+    b2BodyDef bodyDef = b2DefaultBodyDef();
     bodyDef.type = b2_staticBody;
-    bodyDef.position.Set(pos.x, pos.y);
-    bodyDef.angle = 0;
-    bodyDef.userData.pointer = 0;
-	bodyDef.userData.pointer = reinterpret_cast<uintptr_t>(userData.get());
-	RigidBody = World::createBody(&bodyDef);
+    bodyDef.position = {pos.x, pos.y};
+    bodyDef.userData = userData.get();
+	b2BodyId bodyId = World::createBody(&bodyDef);
 
-    b2PolygonShape Box;
-    Box.SetAsBox(Size.x / 2, Size.y / 2);
-
-	b2FixtureDef fixtureDef;
-	fixtureDef.shape = &Box;
-    fixtureDef.isSensor = true;
-	fixtureDef.density = 1.0f;
-	fixtureDef.friction = 0.3f;
-	RigidBody->CreateFixture(&fixtureDef);
-	
-	entity.emplace<RigidBody2D>(RigidBody);
+	entity.emplace<RigidBody2D>(bodyId);
 
 	entity.set<UserDataComponent>({ std::move(userData) });
 

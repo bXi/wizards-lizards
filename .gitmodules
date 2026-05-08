@@ -10,6 +10,6 @@
 [submodule "libs/glm"]
 	path = libs/glm
 	url = https://github.com/g-truc/glm.git
-[submodule "libs/bixxy-engine"]
-	path = libs/bixxy-engine
-	url = git@github.com:bXi/bixxy-engine.git
+[submodule "libs/luminoveau"]
+	path = libs/luminoveau
+	url = git@github.com:bXi/luminoveau.git
