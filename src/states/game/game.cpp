@@ -179,6 +179,7 @@ void GameState::load()
     dungeonTileset = AssetHandler::GetTexture("assets/tilesets/dungeon.png");
 
     LightLayer::Init(1024);
+    Particles::Init();
 
 
     AssetHandler::GetFont("assets/fonts/APL386.ttf", 20);
@@ -1341,6 +1342,8 @@ void GameState::update()
 			}
 		}
 	}*/
+
+	Particles::Update(static_cast<float>(Window::GetFrameTime()));
 
 	for (const auto& _spawner : spawners) {
 		_spawner->spawnTimer -= (float)(Window::GetFrameTime() / Configuration::slowMotionFactor);

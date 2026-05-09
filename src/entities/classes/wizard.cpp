@@ -29,6 +29,12 @@ void WizardClass::update()
 	secondsSinceLastFragment -= delta;
 	hitTimer -= delta;
 
+	if (m_laserParticlesInited) {
+		for (auto& h : m_laserHitParticles) {
+			Particles::Stop(h);
+			Particles::QueueDraw(h);
+		}
+	}
 }
 
 void WizardClass::doDamage(flecs::entity* entity, int weaponId)
@@ -187,11 +193,14 @@ void WizardClass::shoot(flecs::entity entity)
 				"djE6NTA2LDAsMTAzLDAsODUsMCwwLDAsMC4xLDcsNC43NywwLjUsNSwxLjUsMC41LDIwLDMuODYs"
 				"MCwwLjM3LDAsMCwxLDAuODYsMCwwLDAuOSwwLjgsMC4wNSwwLDAuNCwwLjMsMCwwLDAsMCwwLjE1"
 				"LDAuNSwx";
-			for (auto& h : m_laserHitParticles)
+			for (auto& h : m_laserHitParticles) {
 				h = Particles::CreateSystemFromPreset(kLaserHitPreset, 500);
+				Particles::Start(h);
+			}
+			m_laserHitCfg = Particles::GetConfig(m_laserHitParticles[0]);
 			m_laserParticlesInited = true;
 		}
-		m_wallHitPositions.clear();
+		m_wallHits.clear();
 		vecLines.clear();
 		float radius = 1.0f * (4.0f * (1.0f + static_cast<float>(beamwidth))) / 32.0f;
 
@@ -239,12 +248,12 @@ void WizardClass::shoot(flecs::entity entity)
 				newDir = rayDir.reflectOn(mirNormal);
 			} else {
 				// Wall / solid block — consumes a bounce
-				m_wallHitPositions.push_back(hitPos);
-				if (wallBouncesLeft <= 0) break;
 				vf2d wallNormal = {};
 				if (lastHitX) wallNormal.x = rayDir.x > 0 ? -1.f : 1.f;
 				else          wallNormal.y = rayDir.y > 0 ? -1.f : 1.f;
 				newDir = rayDir.reflectOn(wallNormal);
+				m_wallHits.push_back({hitPos, newDir});
+				if (wallBouncesLeft <= 0) break;
 				--wallBouncesLeft;
 			}
 
@@ -272,18 +281,28 @@ void WizardClass::shoot(flecs::entity entity)
 
 		}
 		LightLayer::EndLight();
-		for (int pi = 0; pi < static_cast<int>(m_wallHitPositions.size()) && pi < LASER_PARTICLE_COUNT; ++pi) {
+		constexpr float kLaserParticleSpeed = 150.0f;
+		const int activeHits = std::min(static_cast<int>(m_wallHits.size()), LASER_PARTICLE_COUNT);
+		for (int pi = 0; pi < activeHits; ++pi) {
 			Particles::SetPosition(m_laserHitParticles[pi], {
-				m_wallHitPositions[pi].x * static_cast<float>(Configuration::tileWidth),
-				m_wallHitPositions[pi].y * static_cast<float>(Configuration::tileHeight),
+				m_wallHits[pi].pos.x * static_cast<float>(Configuration::tileWidth),
+				m_wallHits[pi].pos.y * static_cast<float>(Configuration::tileHeight) + 5.0f,
 				0.0f
 			});
+			m_laserHitCfg.spawnVelocity = {
+				m_wallHits[pi].outDir.x * kLaserParticleSpeed,
+				m_wallHits[pi].outDir.y * kLaserParticleSpeed,
+				0.0f
+			};
+			m_laserHitCfg.emitRate = 200.0f;
+			Particles::UpdateConfig(m_laserHitParticles[pi], m_laserHitCfg);
 			Particles::Start(m_laserHitParticles[pi]);
-            Particles::QueueDraw(m_laserHitParticles[pi]);
 		}
-
-        if (m_wallHitPositions.size() > 0) {
-        }
+		for (int pi = activeHits; pi < LASER_PARTICLE_COUNT; ++pi) {
+			m_laserHitCfg.emitRate = 0.0f;
+			Particles::UpdateConfig(m_laserHitParticles[pi], m_laserHitCfg);
+			Particles::Stop(m_laserHitParticles[pi]);
+		}
 		if (laserLastDamageTick <= 0.0f) {
 			for (auto& edge : vecLines) {
 

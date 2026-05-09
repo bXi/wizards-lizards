@@ -171,7 +171,7 @@ void LightLayer::_init(int probeTarget) {
     SpriteRenderTargetConfig outputCfg;
     outputCfg.clearOnLoad    = true;
     outputCfg.clearColor     = 0x00000000;
-    outputCfg.blendMode      = BlendMode::None;
+    outputCfg.blendMode      = BlendMode::Additive;
     outputCfg.renderToScreen = true;
     outputCfg.width          = primaryFB->width;
     outputCfg.height         = primaryFB->height;
@@ -217,6 +217,8 @@ void LightLayer::_endLight() {
 // Call once per frame after all StartLight/EndLight pairs.
 
 void LightLayer::_draw(vf2d pos, vf2d size) {
+    if (m_sceneClear) return; // no StartLight this frame — nothing to render
+
     // Bounce: convert previous frame's fluence → re-emission texture
     {
         BounceParams bp{};

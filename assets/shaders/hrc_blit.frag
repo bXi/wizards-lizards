@@ -52,5 +52,6 @@ void main() {
     vec3 indirect = (fluence / TWO_PI) * (1.0 - scene.a);
     vec3 hdr = (emissive + indirect) * uExposure;
 
-    FragColor = vec4(linearToSrgb(acesTonemap(hdr)) + triangularDither(), 1.0);
+    vec3 out_rgb = linearToSrgb(acesTonemap(hdr)) + triangularDither();
+    FragColor = vec4(out_rgb, 1.0);
 }

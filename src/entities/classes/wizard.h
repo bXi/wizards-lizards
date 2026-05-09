@@ -17,10 +17,16 @@ class WizardClass : public BaseClass
 
     std::vector<lineSegment> vecLines;
 
+    struct WallHit {
+        vf2d pos;
+        vf2d outDir;
+    };
+
     static constexpr int LASER_PARTICLE_COUNT = 12;
     ParticleSystemHandle m_laserHitParticles[LASER_PARTICLE_COUNT];
     bool                 m_laserParticlesInited = false;
-    std::vector<vf2d>    m_wallHitPositions;
+    std::vector<WallHit> m_wallHits;
+    ParticleSystemConfig m_laserHitCfg;
 
     float secondsSinceLastShot = 0.0f;
     float laserLastDamageTick = 0.0f;
