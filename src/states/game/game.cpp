@@ -179,6 +179,7 @@ void GameState::load()
     dungeonTileset = AssetHandler::GetTexture("assets/tilesets/dungeon.png");
 
     LightLayer::Init(1024);
+    LightLayer::SetExposure(0.8f);
     Particles::Init();
 
 
