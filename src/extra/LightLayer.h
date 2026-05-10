@@ -36,10 +36,18 @@ public:
     static void SetBounceAlbedo(float v)                          { get().m_bounceAlbedo = v; }
     static void SetAmbient(bool v)                                { get().m_ambient = v; }
     static void SetAmbientColor(float r, float g, float b)        { get().m_ambientColor[0]=r; get().m_ambientColor[1]=g; get().m_ambientColor[2]=b; }
+    static void SetFalloffGamma(float v)                          { get().m_falloffGamma = v; }
+    static void SetFalloffShift(float v)                          { get().m_falloffShift = v; }
 
-    static float GetExposure()    { return get().m_exposure; }
-    static bool  GetBounces()     { return get().m_bounces; }
-    static bool  GetAmbient()     { return get().m_ambient; }
+    static float GetExposure()      { return get().m_exposure; }
+    static bool  GetBounces()       { return get().m_bounces; }
+    static bool  GetAmbient()       { return get().m_ambient; }
+    static float GetFalloffGamma()  { return get().m_falloffGamma; }
+    static float GetFalloffShift()  { return get().m_falloffShift; }
+
+    // Pass name for sprites that should render above the HRC light overlay.
+    static constexpr const char* ForegroundPass = "2dsprites_fg";
+    static constexpr const char* UIPass         = "2dsprites_ui";
 
     // ── Singleton boilerplate ──
     LightLayer(const LightLayer&) = delete;
@@ -102,4 +110,6 @@ private:
     float m_bounceAlbedo    = 0.5f;
     bool  m_ambient         = false;
     float m_ambientColor[3] = { 0.02f, 0.02f, 0.04f };
+    float m_falloffGamma    = 1.0f;
+    float m_falloffShift    = 0.0f;
 };

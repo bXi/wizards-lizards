@@ -21,8 +21,8 @@ layout(set = 2, binding = 0) uniform BlurUniforms {
     uint stride;
     uint screenW;
     uint screenH;
-    uint pad0;
-    uint pad1;
+    float falloffGamma;
+    float falloffShift;
     uint pad2;
 };
 
@@ -67,5 +67,14 @@ void main() {
         }
     }
 
-    imageStore(dstTex, ivec2(x, y), vec4(sum / wt, 1.0));
+    const float kTwoPi = 6.28318530718;
+    vec3 fluence = sum / wt;
+    // Pure Reinhard n/(1+n) maps [0,∞)→[0,1), preserving relative gradient so
+    // far probes stay dim. gamma>1 darkens the dims further ("shorter light reach").
+    // falloffShift is a global scale [0,1] to keep bright areas from blowing out.
+    vec3 n = fluence / kTwoPi;
+    n = n / (1.0 + n);
+    n = pow(n, vec3(falloffGamma));
+    n = n * falloffShift;
+    imageStore(dstTex, ivec2(x, y), vec4(n * kTwoPi, 1.0));
 }

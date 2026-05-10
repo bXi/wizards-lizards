@@ -10,7 +10,6 @@ layout(set = 3, binding = 0) uniform BlitUniforms {
     float uExposure;
     float uTexW;
     float uTexH;
-    float _pad;
 };
 
 layout(location = 0) in  vec2 tex_coords;
@@ -50,7 +49,7 @@ void main() {
 
     vec3 emissive = scene.rgb * scene.a;
     vec3 indirect = (fluence / TWO_PI) * (1.0 - scene.a);
-    vec3 hdr = (emissive + indirect) * uExposure;
+    vec3 hdr      = (emissive + indirect) * uExposure;
 
     vec3 out_rgb = linearToSrgb(acesTonemap(hdr)) + triangularDither();
     FragColor = vec4(out_rgb, 1.0);

@@ -190,9 +190,7 @@ void WizardClass::shoot(flecs::entity entity)
 
 		if (!m_laserParticlesInited) {
 			static constexpr const char* kLaserHitPreset =
-				"djE6NTA2LDAsMTAzLDAsODUsMCwwLDAsMC4xLDcsNC43NywwLjUsNSwxLjUsMC41LDIwLDMuODYs"
-				"MCwwLjM3LDAsMCwxLDAuODYsMCwwLDAuOSwwLjgsMC4wNSwwLDAuNCwwLjMsMCwwLDAsMCwwLjE1"
-				"LDAuNSwx";
+				"djE6NTA2LDMuOCwxMDMsMCw4NSwwLDAsMCwwLjEsMC45LDQuNzcsMC41LDMuNCw1LDAuNSw3LDAuMSwwLDAuMzcsMCwwLDEsMC44NiwwLDAsMC45LDAuOCwwLjA1LDAsMC40LDAuMywwLDAsMCwwLDAuMTUsMC41LDE=";
 			for (auto& h : m_laserHitParticles) {
 				h = Particles::CreateSystemFromPreset(kLaserHitPreset, 500);
 				Particles::Start(h);
@@ -202,7 +200,8 @@ void WizardClass::shoot(flecs::entity entity)
 		}
 		m_wallHits.clear();
 		vecLines.clear();
-		float radius = 1.0f * (4.0f * (1.0f + static_cast<float>(beamwidth))) / 32.0f;
+		//float radius = 1.0f * (4.0f * (1.0f + static_cast<float>(beamwidth))) / 32.0f;
+        float radius = sqrtf(1.0f + static_cast<float>(beamwidth)) * 0.25f;
 
 		vf2d startPosition = { pos.x - 0.5f, pos.y - 0.5f };
 		// Nudge off exact tile boundaries so the DDA never produces a zero-length first segment
@@ -277,7 +276,7 @@ void WizardClass::shoot(flecs::entity entity)
 			}
 
 			float radius = edge.radius * 16.0f;
-			Draw::ThickLine(start, end, { 255,100,100,25 }, radius * 2.0f);
+			Draw::ThickLine(start, end, { 255,96,96,50 }, radius * 2.0f);
 
 		}
 		LightLayer::EndLight();

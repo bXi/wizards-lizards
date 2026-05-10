@@ -1,5 +1,6 @@
 #include "LightLayer.h"
 #include "luminoveau.h"
+#include "renderer/spriterenderpass.h"
 #include "SDL3/SDL_gpu.h"
 #include <algorithm>
 #include <cmath>
@@ -63,7 +64,9 @@ struct MergeUniforms {
 
 struct BlurUniforms {
     uint32_t w, h, stride, screenW, screenH;
-    uint32_t _pad0, _pad1, _pad2;
+    float    falloffGamma;
+    float    falloffShift;
+    uint32_t _pad2;
 };
 
 struct ClearParams {
@@ -162,20 +165,45 @@ void LightLayer::_init(int probeTarget) {
 #endif
     Renderer::CreateSpriteRenderTarget("ll_bounce", bounceCfg);
 
-    // ll_output must match primaryFramebuffer dimensions exactly.
-    // renderFrameBuffer reuses the same rtt_uniforms (uMax=physW/primaryFB.width)
-    // for all renderToScreen passes — if ll_output is smaller than primaryFB,
-    // the UV sub-range is wrong and the content appears offset/scaled.
-    auto* primaryFB = Renderer::GetFramebuffer("primaryFramebuffer");
-
     SpriteRenderTargetConfig outputCfg;
-    outputCfg.clearOnLoad    = true;
-    outputCfg.clearColor     = 0x00000000;
-    outputCfg.blendMode      = BlendMode::Additive;
-    outputCfg.renderToScreen = true;
-    outputCfg.width          = primaryFB->width;
-    outputCfg.height         = primaryFB->height;
+    outputCfg.clearOnLoad = true;
+    outputCfg.clearColor  = 0x00000000;
+    outputCfg.blendMode   = BlendMode::None;
+    outputCfg.renderToScreen = false;
+    outputCfg.width       = physW;
+    outputCfg.height      = physH;
     Renderer::CreateSpriteRenderTarget("ll_output", outputCfg);
+
+    // Inject render passes into the primary framebuffer for correct layer ordering:
+    // "2dsprites" (floor) → "ll_hrc" additive (HRC) → "2dsprites_fg" (tiles above light).
+    auto* primaryFB = Renderer::GetFramebuffer("primaryFramebuffer");
+    auto swapFmt    = SDL_GetGPUSwapchainTextureFormat(Renderer::GetDevice(), Window::GetWindow());
+
+    SDL_GPUColorTargetBlendState additiveBlend = {
+        .src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+        .dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+        .color_blend_op        = SDL_GPU_BLENDOP_ADD,
+        .src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+        .dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE,
+        .alpha_blend_op        = SDL_GPU_BLENDOP_ADD,
+        .enable_blend          = true,
+    };
+
+    auto* hrcPass = new SpriteRenderPass(Renderer::GetDevice());
+    hrcPass->UpdateRenderPassBlendState(additiveBlend);
+    hrcPass->color_target_info_loadop = SDL_GPU_LOADOP_LOAD;
+    hrcPass->init(swapFmt, primaryFB->width, primaryFB->height, "ll_hrc");
+    primaryFB->renderpasses.emplace_back("ll_hrc", hrcPass);
+
+    auto* fgPass = new SpriteRenderPass(Renderer::GetDevice());
+    fgPass->color_target_info_loadop = SDL_GPU_LOADOP_LOAD;
+    fgPass->init(swapFmt, primaryFB->width, primaryFB->height, "2dsprites_fg");
+    primaryFB->renderpasses.emplace_back("2dsprites_fg", fgPass);
+
+    auto* uiPass = new SpriteRenderPass(Renderer::GetDevice());
+    uiPass->color_target_info_loadop = SDL_GPU_LOADOP_LOAD;
+    uiPass->init(swapFmt, primaryFB->width, primaryFB->height, "2dsprites_ui");
+    primaryFB->renderpasses.emplace_back("2dsprites_ui", uiPass);
 
     Shader vert     = AssetHandler::GetShader("assets/shaders/effect_passthrough.vert");
     Shader blitFrag = AssetHandler::GetShader("assets/shaders/hrc_blit.frag");
@@ -197,6 +225,19 @@ void LightLayer::_close() {
     Renderer::RemoveSpriteRenderTarget("ll_fluence");
     Renderer::RemoveSpriteRenderTarget("ll_bounce");
     Renderer::RemoveSpriteRenderTarget("ll_output");
+
+    auto* primaryFB = Renderer::GetFramebuffer("primaryFramebuffer");
+    if (primaryFB) {
+        for (auto it = primaryFB->renderpasses.begin(); it != primaryFB->renderpasses.end(); ) {
+            if (it->first == "ll_hrc" || it->first == "2dsprites_fg" || it->first == "2dsprites_ui") {
+                it->second->release();
+                delete it->second;
+                it = primaryFB->renderpasses.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
 }
 
 // ── _startLight ──
@@ -252,11 +293,13 @@ void LightLayer::_draw(vf2d pos, vf2d size) {
     // Blur + convert (SSBO RGB9E5 → rgba16f texture)
     {
         BlurUniforms bu{};
-        bu.w       = m_probesX;
-        bu.h       = m_probesY;
-        bu.stride  = m_fluenceStride;
-        bu.screenW = uint32_t(m_texW);
-        bu.screenH = uint32_t(m_texH);
+        bu.w            = m_probesX;
+        bu.h            = m_probesY;
+        bu.stride       = m_fluenceStride;
+        bu.screenW      = uint32_t(m_texW);
+        bu.screenH      = uint32_t(m_texH);
+        bu.falloffGamma = m_falloffGamma;
+        bu.falloffShift = m_falloffShift;
 
         Compute::SetPipeline(m_blurPipeline);
         Compute::BindReadTexture(0, _sceneTex());
@@ -266,7 +309,8 @@ void LightLayer::_draw(vf2d pos, vf2d size) {
         Compute::DispatchAuto(m_probesX, m_probesY, 1);
     }
 
-    // Blit: composite scene + fluence → output RT
+    // Blit: composite scene + fluence → ll_output (intermediate, starts clear).
+    // The effect system clears ll_output on first write — that's intentional here.
     m_blitEffect["uExposure"] = m_exposure;
     m_blitEffect["uTexW"]     = m_texW;
     m_blitEffect["uTexH"]     = m_texH;
@@ -281,8 +325,15 @@ void LightLayer::_draw(vf2d pos, vf2d size) {
     Draw::ClearEffectTextures();
     Draw::ResetTargetRenderPass();
 
-    // renderToScreen=true on ll_output: renderFrameBuffer blits it to swapchain
-    // in NDC space — no world/camera dependency, always covers full screen.
+    // Draw ll_output as plain sprite to "ll_hrc" in the primary framebuffer.
+    // No effect → no clearing. Pass uses LOAD_OP + additive blend, so HRC
+    // composites on top of whatever was already drawn to the primary FB.
+    bool camWasActive = Camera::IsActive();
+    if (camWasActive) Camera::Deactivate();
+    Draw::SetTargetRenderPass("ll_hrc");
+    Draw::Texture(_outputTexV(), {0.0f, 0.0f}, {m_rtW, m_rtH});
+    Draw::ResetTargetRenderPass();
+    if (camWasActive) Camera::Activate();
 
     // Mark scene for clearing on next frame's first StartLight
     m_sceneClear = true;

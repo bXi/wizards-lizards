@@ -179,7 +179,10 @@ void GameState::load()
     dungeonTileset = AssetHandler::GetTexture("assets/tilesets/dungeon.png");
 
     LightLayer::Init(1024);
-    LightLayer::SetExposure(0.8f);
+    LightLayer::SetExposure(1.8f);
+    LightLayer::SetFalloffGamma(3.0f);
+    LightLayer::SetFalloffShift(0.5f);
+
     Particles::Init();
 
 
@@ -713,6 +716,8 @@ for (int y = topMargin; y < bottomMargin; y++) {
     LightLayer::Draw({0,0}, Window::GetSize());
 
 
+
+    Draw::SetTargetRenderPass(LightLayer::ForegroundPass);
 
 
 	for (int y = topMargin; y < bottomMargin; y++) {
